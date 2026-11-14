@@ -38,6 +38,8 @@ pub struct Config {
     /// Macro scratchpads: groups of apps summoned and dismissed together with one key.
     #[serde(rename = "scratchpad")]
     pub scratchpads: Vec<Scratchpad>,
+    /// The phone app (Oxide Remote): run oxide-remoted so paired phones can connect.
+    pub remote: RemoteCfg,
     pub exec_once: Vec<String>,
     pub env: Vec<(String, String)>,
 }
@@ -385,6 +387,12 @@ pub enum Dir {
     Down,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+#[serde(default)]
+pub struct RemoteCfg {
+    pub enabled: bool,
+}
+
 /// A group of windows that appears and disappears as one, arranged side by side over the current workspace.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(default)]
@@ -636,6 +644,7 @@ impl Default for Config {
                 .map(|c| WindowRule { app_id: Some((*c).into()), opacity: Some(0.92), ..WindowRule::default() })
                 .collect(),
             scratchpads: vec![],
+            remote: RemoteCfg::default(),
             exec_once: vec![],
             shell: ShellCfg::default(),
             theme: theme::ThemeCfg::default(),

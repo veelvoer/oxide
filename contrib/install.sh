@@ -7,7 +7,7 @@ cd "$(dirname "$0")/.."
 cargo build --release
 T="${CARGO_TARGET_DIR:-target}/release"
 mkdir -p "$HOME/.local/share/oxide/wallpapers" "$HOME/.local/bin" "$HOME/.local/share/oxide/shells" "$HOME/.config/oxide/shells"
-install -m755 "$T/oxide" "$T/oxide-ctl" "$T/oxide-settings" "$T/oxide-ai" contrib/oxide-session "$HOME/.local/bin/"
+install -m755 "$T/oxide" "$T/oxide-ctl" "$T/oxide-settings" "$T/oxide-ai" "$T/oxide-remoted" contrib/oxide-session "$HOME/.local/bin/"
 rm -rf "$HOME/.local/share/oxide/shells/oxide"
 cp -r contrib/shells/oxide "$HOME/.local/share/oxide/shells/oxide"
 cp -r contrib/wallpapers/. "$HOME/.local/share/oxide/wallpapers/"

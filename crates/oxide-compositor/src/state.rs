@@ -191,6 +191,8 @@ pub struct Oxide {
     pub super_combo: bool,
     /// scratchpad apps that were started and are expected to map: (app id, group workspace, when)
     pub group_pending: Vec<(String, u32, std::time::Instant)>,
+    /// a button press that dismissed a group: its release is swallowed too
+    pub group_swallow: Option<u32>,
     /// dims the workspace behind a shown scratchpad group
     pub scrim: SolidColorBuffer,
     /// the zoom-out overview (Super+Tab), when open
@@ -198,6 +200,8 @@ pub struct Oxide {
     /// system CPU load 0..1 and the window processes the telemetry thread watches
     pub cpu_load: f32,
     pub telemetry_pids: crate::telemetry::PidSet,
+    /// oxide-remoted, while Settings > Phone is on
+    pub remote: Option<std::process::Child>,
     /// frame recorder (test aid): directory, frames left, frames written
     pub recorder: Option<(String, u32, u32)>,
     /// held send-key bind: (physical keycode, generation) so it repeats like a real key
@@ -349,10 +353,12 @@ impl Oxide {
             super_down: None,
             super_combo: false,
             group_pending: vec![],
+            group_swallow: None,
             scrim: SolidColorBuffer::default(),
             overview: None,
             cpu_load: 0.0,
             telemetry_pids: Default::default(),
+            remote: None,
             recorder: None,
             send_repeat: None,
             repeat_gen: 0,
@@ -460,6 +466,7 @@ impl Oxide {
     /// Install a new config and apply everything that can change live.
     pub fn apply_config(&mut self, config: Config) {
         self.config = config;
+        self.sync_remote();
         crate::render::set_clear(&oxide_config::theme::palette(&self.config.theme).bg);
         oxide_config::defaults::apply_env(&self.config);
         {
@@ -525,10 +532,30 @@ impl Oxide {
     }
 
     /// Run once the socket and ipc are up: env and autostart.
+    /// Start or stop oxide-remoted to match the setting.
+    pub fn sync_remote(&mut self) {
+        let running = self.remote.as_mut().is_some_and(|c| matches!(c.try_wait(), Ok(None)));
+        let want = self.config.remote.enabled && std::env::var_os("OXIDE_TEST").is_none();
+        if want && !running {
+            self.remote = std::process::Command::new("oxide-remoted")
+                .env("WAYLAND_DISPLAY", &self.socket_name)
+                .stdin(std::process::Stdio::null())
+                .spawn()
+                .map_err(|e| tracing::warn!("cannot start oxide-remoted: {e}"))
+                .ok();
+        } else if !want && running {
+            if let Some(mut c) = self.remote.take() {
+                let _ = c.kill();
+                let _ = c.wait();
+            }
+        }
+    }
+
     pub fn startup(&mut self) {
         self.auto_theme_start();
         self.config_watch_start();
         self.telemetry_start();
+        self.sync_remote();
         // theme files and app colors: helper tools are involved, so never on the compositor thread
         crate::render::set_clear(&oxide_config::theme::palette(&self.config.theme).bg);
         // kitty windows started from now on read the standard (or the user's own) configuration

@@ -5,3 +5,7 @@
 .DS_Store
 # local reference material
 /Oxide Settings-png_1/
+/phone/build
+/phone/target
+/phone/*.apk
+*.keystore

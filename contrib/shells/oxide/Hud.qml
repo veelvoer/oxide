@@ -83,15 +83,23 @@ PanelWindow {
     }
 
     // ---- focused window ----
-    Txt {
+    Glass {
         anchors.horizontalCenter: parent.horizontalCenter
-        y: top.y + top.height + 10
-        opacity: win.t * 0.9
+        y: top.y + top.height + 8
+        opacity: win.t
         visible: !!OxideState.focused
-        text: OxideState.focused ? (OxideState.focused.title || OxideState.focused.app_id) : ""
-        color: Theme.text
-        font.pixelSize: 13
-        style: Text.Outline; styleColor: Theme.alpha(Theme.bg, 0.6)
+        radius: height / 2
+        width: Math.min(titleTxt.implicitWidth + 28, parent.width * 0.6)
+        height: 30
+        Txt {
+            id: titleTxt
+            anchors.centerIn: parent
+            width: Math.min(implicitWidth, parent.width - 28)
+            elide: Text.ElideRight
+            text: OxideState.focused ? (OxideState.focused.title || OxideState.focused.app_id) : ""
+            color: Theme.text
+            font.pixelSize: 13
+        }
     }
 
     // ---- bottom: key hints ----

@@ -153,20 +153,27 @@ pub fn row_sub(ui: &mut Ui, icon: &str, name: &str, sub: &str, last: bool, contr
 
 /// Animated on/off switch.
 pub fn switch(ui: &mut Ui, on: &mut bool) -> egui::Response {
-    let size = vec2(36.0, 20.0);
+    // a full pill with a round knob, whatever the theme's roundness
+    let size = vec2(40.0, 22.0);
     let (rect, mut resp) = ui.allocate_exact_size(size, Sense::click());
     if resp.clicked() {
         *on = !*on;
         resp.mark_changed();
     }
     let t = tween(ui.ctx(), resp.id, if *on { 1.0 } else { 0.0 }, 0.14);
-    let bg = lerp_color(lerp_color(FIELD(), MUTED(), 0.4), ACCENT(), t);
-    ui.painter().rect_filled(rect, radius(4), bg);
-    ui.painter().rect_stroke(rect, radius(4), Stroke::new(1.0, lerp_color(lerp_color(BORDER(), MUTED(), 0.5), ACCENT(), t)), egui::StrokeKind::Inside);
-    let knob = vec2(14.0, 14.0);
-    let x = egui::lerp((rect.left() + 3.0)..=(rect.right() - 3.0 - knob.x), ease_out(t));
-    let k = Rect::from_min_size(Pos2::new(x, rect.center().y - 7.0), knob);
-    ui.painter().rect_filled(k, radius(2), lerp_color(TEXT(), ON_ACCENT(), t));
+    let hover = if resp.hovered() { 0.12 } else { 0.0 };
+    let bg = lerp_color(lerp_color(FIELD(), MUTED(), 0.35 + hover), ACCENT(), t);
+    let pill = rect.height() / 2.0;
+    ui.painter().rect_filled(rect, pill, bg);
+    if t < 1.0 {
+        ui.painter().rect_stroke(rect, pill, Stroke::new(1.0, lerp_color(BORDER(), ACCENT(), t)), egui::StrokeKind::Inside);
+    }
+    let r = 8.0;
+    let x = egui::lerp((rect.left() + 3.0 + r)..=(rect.right() - 3.0 - r), ease_out(t));
+    ui.painter().circle_filled(Pos2::new(x, rect.center().y), r, lerp_color(TEXT(), ON_ACCENT(), t));
+    if resp.has_focus() {
+        ui.painter().rect_stroke(rect.expand(2.0), pill + 2.0, Stroke::new(1.5, ACCENT()), egui::StrokeKind::Outside);
+    }
     resp.on_hover_cursor(egui::CursorIcon::PointingHand)
 }
 

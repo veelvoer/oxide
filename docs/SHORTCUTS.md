@@ -18,6 +18,8 @@ follow the key's **position** on the keyboard.
 | `Super+A` | Assistant (press again to close; while the chat is open but unfocused it takes the cursor back) |
 | `Super+Z` | Quick settings |
 | `Super+O` | Options for the focused window |
+| `Super+Tab` | Overview: all workspaces, drag windows between them ([more](WORKFLOW.md)) |
+| hold `Super` | HUD with time, workspaces and shortcuts (when the bar is hidden) |
 | `Super+Shift+V` | Clipboard history |
 | `Super+N`, `Super+Shift+X` | Lock the screen |
 | `Print` | Screenshot of an area (to the clipboard; needs `grim` and `slurp`) |

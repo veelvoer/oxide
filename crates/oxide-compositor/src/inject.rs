@@ -115,6 +115,11 @@ impl Oxide {
         let t = self.now_ms();
         match cmd {
             InputCmd::Move { x, y } => self.pointer_motion((x, y).into(), t),
+            InputCmd::MoveBy { dx, dy } => {
+                let p = self.pointer.current_location();
+                let to = self.clamp_to_outputs(p + smithay::utils::Point::from((dx, dy)));
+                self.pointer_motion(to, t)
+            }
             InputCmd::Button { button, pressed } => {
                 let state = if pressed { ButtonState::Pressed } else { ButtonState::Released };
                 self.button_event(button_code(&button), state, t);

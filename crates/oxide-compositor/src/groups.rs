@@ -4,6 +4,9 @@
 use std::time::{Duration, Instant};
 
 use oxide_config::GROUP_WS;
+use smithay::desktop::layer_map_for_output;
+use smithay::utils::{Logical, Point};
+use smithay::wayland::shell::wlr_layer::Layer;
 
 use crate::state::Oxide;
 
@@ -12,6 +15,40 @@ fn app_matches(want: &str, app_id: &str) -> bool {
 }
 
 impl Oxide {
+    /// A click on the dimmed area around a shown group sends the group away (the click goes no further).
+    pub fn group_click(&mut self, pos: Point<f64, Logical>) -> bool {
+        let Some(mi) = self.monitors.iter().position(|m| {
+            m.overlay.is_some() && self.space.output_geometry(&m.output).is_some_and(|g| g.to_f64().contains(pos))
+        }) else {
+            return false;
+        };
+        let gws = self.monitors[mi].overlay.unwrap_or_default();
+        let ogeo = self.space.output_geometry(&self.monitors[mi].output).unwrap_or_default();
+        {
+            let layers = layer_map_for_output(&self.monitors[mi].output);
+            let local = pos - ogeo.loc.to_f64();
+            if layers.layer_under(Layer::Overlay, local).is_some() || layers.layer_under(Layer::Top, local).is_some() {
+                return false;
+            }
+        }
+        // anywhere inside the block (also the gaps between members) counts as the group
+        let on_group = self
+            .wins
+            .iter()
+            .filter(|x| x.ws == gws)
+            .filter_map(|x| self.space.element_geometry(&x.window))
+            .reduce(|a, b| a.merge(b))
+            .is_some_and(|r| r.to_f64().contains(pos));
+        if on_group {
+            return false;
+        }
+        self.monitors[mi].overlay = None;
+        self.focus = None;
+        self.arrange();
+        self.refocus();
+        true
+    }
+
     pub fn toggle_scratchpad(&mut self, name: &str) {
         let Some(idx) = self.config.scratchpads.iter().position(|s| s.name.eq_ignore_ascii_case(name)) else {
             tracing::warn!("no scratchpad named {name:?}");

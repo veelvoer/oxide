@@ -23,7 +23,8 @@ and are saved). The settings app and the file are two views of the same data.
 
 ## `[decoration]`
 
-`rounding` (12), `active_opacity` (1.0), `inactive_opacity` (0.94), `dim_inactive` (0.0);
+`rounding` (12), `active_opacity` (1.0), `inactive_opacity` (0.94), `dim_inactive` (0.0), `telemetry` (true: borders
+show builds, errors, calls and CPU load);
 `[decoration.blur]` `enabled`, `size`, `passes`; `[decoration.shadow]` `enabled`, `range`, `color`.
 
 ## `[input]`
@@ -41,7 +42,9 @@ and are saved). The settings app and the file are two views of the same data.
 
 ## `[layout]`
 
-`master_factor` (share of the screen for the master area), `split_ratio` (dwindle split for new windows).
+`master_factor` (share of the screen for the master area), `split_ratio` (dwindle split for new windows),
+`context_aware` (true: a window with an error or a call grows on its own), `focus_weight` (0.62: how much it takes).
+See [WORKFLOW.md](WORKFLOW.md).
 
 ## `[[monitor]]`
 
@@ -98,6 +101,15 @@ existing file automatically, unless the key is already used by one of yours. Oth
 ## `[[rule]]`
 
 Window rules; see [WINDOW-OPTIONS.md](WINDOW-OPTIONS.md).
+
+## `[[scratchpad]]`
+
+Groups of apps summoned and dismissed together with one key (`toggle_scratchpad` action); see
+[WORKFLOW.md](WORKFLOW.md#macro-scratchpads).
+
+## `[remote]`
+
+`enabled` (false): run `oxide-remoted` so paired phones can see and control this PC; see [PHONE.md](PHONE.md).
 
 ## `exec_once` and `env`
 

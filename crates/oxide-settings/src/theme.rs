@@ -244,7 +244,7 @@ pub fn apply(ctx: &Context) {
         style.text_styles.insert(TextStyle::Body, FontId::proportional(14.5));
         style.text_styles.insert(TextStyle::Button, FontId::proportional(14.0));
         style.text_styles.insert(TextStyle::Small, FontId::proportional(12.5));
-        style.text_styles.insert(TextStyle::Heading, FontId::new(22.0, medium()));
+        style.text_styles.insert(TextStyle::Heading, FontId::new(26.0, medium()));
         style.text_styles.insert(TextStyle::Monospace, FontId::monospace(13.5));
     });
 }

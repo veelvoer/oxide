@@ -9,7 +9,7 @@ PREFIX  ?= /usr/local
 DESTDIR ?=
 CARGO   ?= cargo
 TARGET  ?= $(if $(CARGO_TARGET_DIR),$(CARGO_TARGET_DIR),target)/release
-BINS    := oxide oxide-ctl oxide-settings oxide-ai
+BINS    := oxide oxide-ctl oxide-settings oxide-ai oxide-remoted
 
 all: build
 

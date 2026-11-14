@@ -2,6 +2,15 @@
 
 ## 0.2.0 (unreleased)
 
+* New: **overview** (`Super+Tab`): a live map of all workspaces, drag windows between them.
+* New: **macro scratchpads**: one key summons or dismisses a group of apps laid out side by side.
+* New: **zero-bar mode** with a HUD while `Super` is held.
+* New: **context-aware tiling** (windows with errors or calls grow) and **telemetry borders** (build pulse, error
+  glow, call wave, CPU warmth).
+* New: **config errors never break the session**: the last good config stays, a card shows the line and opens `$EDITOR`.
+* New: the assistant is a **docked panel** that takes its own space instead of floating over windows.
+* New: **Oxide Remote**: `oxide-remoted` plus an Android app in Rust (live screen, stats, touchpad, keyboard,
+  media, notifications, Wake-on-LAN, several PCs). Settings → Phone.
 * New: **window options** (`Super+O`): act on the window and remember rules per app, with undo.
 * New: the theme can **follow the wallpaper** (default shell: the chosen picture; own shells: whatever the
   background layer shows).

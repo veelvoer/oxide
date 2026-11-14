@@ -14,6 +14,10 @@ whole session that stays far below 1 GB of RAM (about 300 MB with the shell runn
 | **Smooth** | Spring and bezier animations for opening, closing, moving, fullscreen, workspaces, borders, popups and the wallpaper. Every animation is interruptible and frame-paced to your screen. Four presets (Springy, Smooth, Snappy, Bouncy) and full per-animation control in Advanced mode. |
 | **Settings that look like an app** | `oxide-settings` covers Wi-Fi, Bluetooth, sound, displays, power, theme, windows, animations, bar, launcher, layout, input, shortcuts, terminal and more. Simple by default, a lot more behind the **Advanced** switch. |
 | **Per-window options** | Press `Super+O` on any window: float it, fullscreen it, send it to a workspace, or tell Oxide that **every window of this app** should always open floating, on a workspace, see-through or blurred. Undo and forget included. |
+| **Overview and scratchpads** | `Super+Tab` zooms out to a live map of all workspaces where you drag windows around. Scratchpads summon a whole group of apps (music player + system monitor, say) with one key. |
+| **Zero-bar mode** | Hide the bar and hold `Super` for a HUD with time, workspaces, battery and shortcuts. |
+| **Tiling that pays attention** | A window with a compiler error or a video call grows on its own; borders pulse while something builds and turn red after an error. |
+| **Your phone as a remote** | The Android app (in Rust) shows the screen live, PC stats, a touchpad, keyboard and media keys, and wakes PCs with Wake-on-LAN. Pair as many PCs as you like. |
 | **A theme that follows you** | Eight palettes, dark and light, or **From wallpaper**: Oxide reads the colors of your wallpaper (a photo, or whatever your own shell draws) and re-colors the shell, the terminal and GTK apps. |
 | **Your shell or ours** | A polished default shell (bar, launcher, quick settings, notifications, clipboard history, lock screen, AI assistant) built on [Quickshell](https://quickshell.org). Or switch to any Quickshell config of your own; the compositor, settings and theme keep working. |
 | **Standard setup or your own files** | Out of the box Oxide generates a good kitty, fish and GTK setup from your theme. In Advanced mode you can switch each part to your own files and edit them in the built-in editor. |
@@ -50,6 +54,8 @@ Pick **Oxide** in your login manager, or run `oxide-session` from a TTY. Full in
 | [Shortcuts](docs/SHORTCUTS.md) | Every default key and mouse binding |
 | [Settings](docs/SETTINGS.md) | What each settings page does |
 | [Window options & rules](docs/WINDOW-OPTIONS.md) | `Super+O` and the window rules behind it |
+| [Overview, scratchpads, HUD](docs/WORKFLOW.md) | `Super+Tab`, groups of apps, zero-bar mode, smart tiling, telemetry borders, config errors |
+| [Phone app](docs/PHONE.md) | Pair your phone, see and control the PC, Wake-on-LAN |
 | [Theming](docs/THEMING.md) | Palettes, light/dark, wallpapers, the theme that follows your wallpaper |
 | [Configuration reference](docs/CONFIG.md) | Every key of `oxide.toml` |
 | [Own shells](docs/SHELLS.md) | Use your own Quickshell config, theme tokens, integration points |

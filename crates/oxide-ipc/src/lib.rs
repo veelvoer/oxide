@@ -46,6 +46,8 @@ pub enum Request {
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum InputCmd {
     Move { x: f64, y: f64 },
+    /// Move the pointer by an offset (a touchpad on a phone).
+    MoveBy { dx: f64, dy: f64 },
     /// button: "left", "right" or "middle"
     Button { button: String, pressed: bool },
     Click { x: f64, y: f64, button: String },

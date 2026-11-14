@@ -5,6 +5,7 @@ mod ownpage;
 mod syntax;
 mod termpage;
 mod pages;
+mod phonepage;
 mod barpage;
 mod launcherpage;
 mod shellpage;
@@ -31,6 +32,7 @@ pub enum Page {
     Sound,
     Displays,
     Power,
+    Phone,
     Theme,
     Appearance,
     Animations,
@@ -62,12 +64,13 @@ const fn nav(page: Page, name: &'static str, icon: &'static str, group: &'static
 }
 
 impl Page {
-    const ALL: [NavItem; 19] = [
+    const ALL: [NavItem; 20] = [
         nav(Page::Wifi, "Wi-Fi", "wifi", "System", "network internet wireless password connect", false),
         nav(Page::Bluetooth, "Bluetooth", "bluetooth", "System", "headphones pair device speaker", false),
         nav(Page::Sound, "Sound", "volume-high", "System", "volume audio speaker microphone mute output input", false),
         nav(Page::Displays, "Displays", "monitor", "System", "screen monitor brightness resolution scale refresh", false),
         nav(Page::Power, "Power", "battery-high", "System", "battery performance saver charge", false),
+        nav(Page::Phone, "Phone", "cellphone", "System", "phone remote android pair wake on lan screen mouse control", false),
         nav(Page::Theme, "Theme", "palette-outline", "Look", "colors accent dark kitty terminal nord gruvbox catppuccin preset", false),
         nav(Page::Appearance, "Windows", "application-outline", "Look", "border gap rounding blur shadow opacity transparent gradient", false),
         nav(Page::Animations, "Animations", "animation-play-outline", "Look", "motion spring bezier curve speed fade", false),
@@ -86,6 +89,7 @@ impl Page {
 }
 
 pub struct App {
+    pub phone: phonepage::PhoneState,
     pub cfg: Config,
     /// What is currently stored on disk.
     saved: Config,
@@ -155,6 +159,7 @@ impl App {
             confirm_reset: false,
             ctx,
             advanced,
+            phone: Default::default(),
             seed_stamp: None,
             jobs: Default::default(),
             wifi: Default::default(),
@@ -343,7 +348,12 @@ impl App {
         egui::ScrollArea::vertical().max_height(nav_height).auto_shrink([false, false]).show(ui, |ui| {
             ui.spacing_mut().item_spacing.y = 1.0;
             let mut group = "";
-            for item in Page::ALL.iter() {
+            // with a search, pages whose name matches come first
+            let mut items: Vec<&NavItem> = Page::ALL.iter().collect();
+            if !query.is_empty() {
+                items.sort_by_key(|i| !i.name.to_lowercase().contains(&query));
+            }
+            for item in items {
                 if item.advanced_only && !self.advanced {
                     continue;
                 }
@@ -395,17 +405,23 @@ impl App {
         }
         ui.horizontal(|ui| {
             ui.add_space(10.0);
-            let mut adv = self.advanced;
-            if switch(ui, &mut adv).changed() {
-                self.set_advanced(adv);
-            }
             ui.label(RichText::new("Advanced").size(13.5));
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                ui.add_space(10.0);
+                let mut adv = self.advanced;
+                if switch(ui, &mut adv).changed() {
+                    self.set_advanced(adv);
+                }
+            });
         });
         ui.add_space(2.0);
         ui.horizontal(|ui| {
             ui.add_space(10.0);
-            switch(ui, &mut self.live);
             ui.label(RichText::new("Apply instantly").size(13.5));
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                ui.add_space(10.0);
+                switch(ui, &mut self.live);
+            });
         });
         ui.add_space(4.0);
         ui.horizontal(|ui| {
@@ -536,6 +552,7 @@ impl eframe::App for App {
                             Page::Bluetooth => syspages::bluetooth(self, ui),
                             Page::Sound => syspages::sound(self, ui),
                             Page::Power => syspages::power(self, ui),
+                            Page::Phone => phonepage::page(self, ui),
                             Page::Appearance => pages::appearance(self, ui),
                             Page::Layout => pages::layout(self, ui),
                             Page::Animations => pages::animations(self, ui),

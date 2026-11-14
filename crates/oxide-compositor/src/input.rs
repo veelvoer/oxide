@@ -309,6 +309,17 @@ impl Oxide {
                 }
             }
         }
+        if state == ButtonState::Pressed && !self.pointer.is_grabbed() && !self.locked() {
+            let pos = self.pointer.current_location();
+            if self.group_click(pos) {
+                self.group_swallow = Some(code);
+                return;
+            }
+        }
+        if state == ButtonState::Released && self.group_swallow == Some(code) {
+            self.group_swallow = None;
+            return;
+        }
         if state == ButtonState::Pressed && !self.pointer.is_grabbed() {
             let pos = self.pointer.current_location();
             self.focus_under(pos);

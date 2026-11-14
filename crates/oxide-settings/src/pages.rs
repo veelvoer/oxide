@@ -72,6 +72,7 @@ pub fn appearance(app: &mut App, ui: &mut Ui) {
         }
     });
     card(ui, "Effects", |ui| {
+        row_sub(ui, "speedometer", "Borders show what the app is doing", "A pulse while something builds, red after an error, warmer with high CPU load.", false, |ui| { switch(ui, &mut d.telemetry); });
         toggle_row(ui, "Blur behind windows", "Frosted glass look for see-through windows. Blurs the wallpaper only.", !(adv && d.blur.enabled), &mut d.blur.enabled);
         if adv && d.blur.enabled {
             slider_row(ui, "Blur strength", "", false, &mut d.blur.size, 1..=20, "");
@@ -91,18 +92,18 @@ pub fn layout(app: &mut App, ui: &mut Ui) {
     page_header(ui, "view-dashboard-outline", "Layout", "Tiling and focus");
     let adv = app.advanced;
     let g = &mut app.cfg.general;
-    card(ui, "Tiling style", |ui| {
-        choice_row(
-            ui,
-            "Default layout",
-            "Dwindle splits space in half for every new window. Master keeps one big window and stacks the rest.",
-            true,
-            &mut g.layout,
-            &[(LayoutKind::Dwindle, "Dwindle"), (LayoutKind::Master, "Master")],
-        );
+    ui.add_space(10.0);
+    ui.label(RichText::new("TILING STYLE").family(crate::theme::medium()).color(MUTED()).size(11.5).extra_letter_spacing(1.1));
+    ui.add_space(4.0);
+    layout_cards(ui, &mut g.layout);
+    let l = &mut app.cfg.layout;
+    card(ui, "", |ui| {
+        row_sub(ui, "arrow-expand-horizontal", "Make room for what matters", "A window with a compiler error or a video call grows on its own.", !adv || !l.context_aware, |ui| { switch(ui, &mut l.context_aware); });
+        if adv && l.context_aware {
+            slider_row(ui, "Size of that window", "", true, &mut l.focus_weight, 0.5..=0.8, "");
+        }
     });
     if adv {
-        let l = &mut app.cfg.layout;
         card(ui, "Sizes (advanced)", |ui| {
             slider_row(ui, "Dwindle split", "How much of the space the first window takes (0.5 = half).", false, &mut l.split_ratio, 0.1..=0.9, "");
             slider_row(ui, "Master area", "Width of the big window in master layout.", true, &mut l.master_factor, 0.1..=0.9, "");
@@ -722,5 +723,56 @@ pub fn config(app: &mut App, ui: &mut Ui) {
                 app.confirm_reset = true;
             }
         });
+    });
+}
+
+/// The two tiling styles as picture cards: a small drawing of the layout, its name and one line about it.
+fn layout_cards(ui: &mut Ui, value: &mut LayoutKind) {
+    let gap = 12.0;
+    let w = ((ui.available_width() - gap) / 2.0).floor();
+    let h = 172.0;
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = gap;
+        for (kind, name, help) in [
+            (LayoutKind::Dwindle, "Dwindle", "Each new window splits the last one in half."),
+            (LayoutKind::Master, "Master", "One main window with the rest stacked beside it."),
+        ] {
+            let (rect, resp) = ui.allocate_exact_size(vec2(w, h), Sense::click());
+            if resp.clicked() {
+                *value = kind.clone();
+            }
+            let resp = resp.on_hover_cursor(egui::CursorIcon::PointingHand);
+            let sel = tween(ui.ctx(), resp.id, (*value == kind) as u8 as f32, 0.18);
+            let hov = tween(ui.ctx(), resp.id.with("h"), resp.hovered() as u8 as f32, 0.12);
+            let p = ui.painter();
+            let r = radius(8);
+            p.rect_filled(rect, r, lerp_color(lerp_color(CARD(), CARD_HOVER(), hov), lerp_color(CARD(), ACCENT(), 0.10), sel));
+            p.rect_stroke(rect, r, Stroke::new(1.0 + sel, lerp_color(BORDER(), ACCENT(), sel)), egui::StrokeKind::Inside);
+            // the drawing
+            let pic = Rect::from_min_max(rect.min + vec2(16.0, 16.0), egui::pos2(rect.right() - 16.0, rect.top() + 106.0));
+            p.rect_filled(pic, radius(6), DEEP());
+            let inner = pic.shrink(7.0);
+            let tile = |x0: f32, y0: f32, x1: f32, y1: f32| {
+                let t = Rect::from_min_max(
+                    egui::pos2(egui::lerp(inner.left()..=inner.right(), x0), egui::lerp(inner.top()..=inner.bottom(), y0)),
+                    egui::pos2(egui::lerp(inner.left()..=inner.right(), x1), egui::lerp(inner.top()..=inner.bottom(), y1)),
+                )
+                .shrink(2.5);
+                p.rect_filled(t, radius(3), lerp_color(FIELD(), lerp_color(FIELD(), ACCENT(), 0.25), sel));
+                p.rect_stroke(t, radius(3), Stroke::new(1.0, lerp_color(BORDER(), ACCENT(), sel * 0.6)), egui::StrokeKind::Inside);
+            };
+            tile(0.0, 0.0, 0.5, 1.0);
+            if kind == LayoutKind::Dwindle {
+                tile(0.5, 0.0, 1.0, 0.5);
+                tile(0.5, 0.5, 0.75, 1.0);
+                tile(0.75, 0.5, 1.0, 1.0);
+            } else {
+                for i in 0..3 {
+                    tile(0.5, i as f32 / 3.0, 1.0, (i + 1) as f32 / 3.0);
+                }
+            }
+            p.text(egui::pos2(rect.left() + 16.0, rect.top() + 122.0), egui::Align2::LEFT_TOP, name, egui::FontId::new(14.0, crate::theme::medium()), TEXT());
+            p.text(egui::pos2(rect.left() + 16.0, rect.top() + 144.0), egui::Align2::LEFT_TOP, help, egui::FontId::proportional(12.5), MUTED());
+        }
     });
 }

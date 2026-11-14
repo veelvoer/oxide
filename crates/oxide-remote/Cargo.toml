@@ -1,0 +1,21 @@
+[package]
+name = "oxide-remote"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "oxide-remoted: lets the Oxide Remote phone app see and control this PC"
+
+[[bin]]
+name = "oxide-remoted"
+path = "src/main.rs"
+
+[dependencies]
+oxide-remote-proto = { path = "../oxide-remote-proto" }
+oxide-ipc = { path = "../oxide-ipc" }
+oxide-config = { path = "../oxide-config" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+wayland-client = "0.31"
+wayland-protocols-wlr = { version = "0.3", features = ["client"] }
+rustix = { version = "1", features = ["fs", "mm"] }
+jpeg-encoder = { version = "0.6", features = ["simd"] }

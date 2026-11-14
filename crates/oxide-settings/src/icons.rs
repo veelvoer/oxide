@@ -34,6 +34,7 @@ pub fn svg(name: &str) -> Option<&'static [u8]> {
         "cached" => include_bytes!("../assets/icons/cached.svg"),
         "calendar-month-outline" => include_bytes!("../assets/icons/calendar-month-outline.svg"),
         "chart-bell-curve" => include_bytes!("../assets/icons/chart-bell-curve.svg"),
+        "cellphone" => include_bytes!("../assets/icons/cellphone.svg"),
         "check" => include_bytes!("../assets/icons/check.svg"),
         "checkbox-marked-circle-outline" => include_bytes!("../assets/icons/checkbox-marked-circle-outline.svg"),
         "chevron-down" => include_bytes!("../assets/icons/chevron-down.svg"),

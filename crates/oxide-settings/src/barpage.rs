@@ -20,6 +20,10 @@ struct BarCfg {
     spacing: i64,
     pills: bool,
     opacity: f64,
+    /// zero-bar: no permanent bar, shown while Super is held
+    hidden: bool,
+    /// edge HUD while Super is held
+    hud: bool,
     lanes: [Vec<Module>; 3],
 }
 
@@ -108,6 +112,8 @@ impl Default for BarCfg {
             spacing: 6,
             pills: false,
             opacity: 0.96,
+            hidden: false,
+            hud: true,
             lanes: [
                 l(&["launcher", "workspaces", "window"]),
                 l(&["clock"]),
@@ -134,6 +140,8 @@ impl BarCfg {
         if let Some(n) = v["spacing"].as_i64() { c.spacing = n; }
         c.pills = v["lanes"].as_str() == Some("pill");
         if let Some(n) = v["opacity"].as_f64() { c.opacity = n; }
+        c.hidden = v["hidden"].as_bool().unwrap_or(false);
+        c.hud = v["hud"].as_bool().unwrap_or(true);
         for (i, name) in LANE_NAMES.iter().enumerate() {
             if let Some(a) = v[*name].as_array() {
                 c.lanes[i] = a.iter().filter_map(|m| m.as_object().cloned()).collect();
@@ -147,6 +155,7 @@ impl BarCfg {
         let v = json!({
             "position": self.position, "style": self.style, "height": self.height, "margin": self.margin,
             "radius": self.radius.unwrap_or(-1), "spacing": self.spacing, "lanes": if self.pills { "pill" } else { "plain" }, "opacity": (self.opacity * 100.0).round() / 100.0,
+            "hidden": self.hidden, "hud": self.hud,
             "left": lane(0), "center": lane(1), "right": lane(2),
         });
         let p = path();
@@ -201,6 +210,8 @@ pub fn page(app: &mut App, ui: &mut Ui) {
         || st.cfg.radius != before.radius
         || st.cfg.spacing != before.spacing
         || st.cfg.pills != before.pills
+        || st.cfg.hidden != before.hidden
+        || st.cfg.hud != before.hud
         || (st.cfg.opacity - before.opacity).abs() > f64::EPSILON
     {
         st.cfg.save();
@@ -460,6 +471,12 @@ fn selected_panel(ui: &mut Ui, st: &mut State) {
 
 fn bar_options(ui: &mut Ui, c: &mut BarCfg) {
     card(ui, "Bar", |ui| {
+        let mut show = !c.hidden;
+        row_sub(ui, "view-dashboard-outline", "Always show the bar", "Off: the whole screen is yours; hold Super to see time, workspaces and shortcuts.", false, |ui| { switch(ui, &mut show); });
+        c.hidden = !show;
+        if c.hidden {
+            toggle_row(ui, "Show the HUD while holding Super", "", false, &mut c.hud);
+        }
         choice_row(ui, "Position", "", false, &mut c.position, &[("top".to_string(), "Top"), ("bottom".to_string(), "Bottom")]);
         choice_row(
             ui,
