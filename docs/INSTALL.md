@@ -53,7 +53,7 @@ The names above are the usual ones; if your distro calls one differently, `pkg-c
 ## 2. Build and install
 
 ```sh
-git clone https://github.com/OWNER/oxide
+git clone https://github.com/veelvoer/oxide
 cd oxide
 ```
 

@@ -26,7 +26,7 @@ whole session that stays far below 1 GB of RAM (about 300 MB with the shell runn
 ## Install in one minute
 
 ```sh
-git clone https://github.com/OWNER/oxide && cd oxide
+git clone https://github.com/veelvoer/oxide && cd oxide
 sudo apt install ... # or dnf / pacman: see docs/INSTALL.md for the exact lines
 make && sudo make install          # system wide, or: contrib/install.sh for your user only
 oxide-ctl doctor                   # checks the rest
