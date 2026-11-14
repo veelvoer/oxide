@@ -1,0 +1,857 @@
+monitor = []
+exec_once = []
+env = []
+
+[general]
+gaps_in = 7
+gaps_out = 3
+border_size = 2
+active_border = [
+    "#88c0d0",
+    "#81a1c1",
+    "#b48ead",
+]
+border_angle = 45.0
+inactive_border = "#4c566aaa"
+layout = "dwindle"
+focus_follows_mouse = true
+cursor_theme = "default"
+cursor_size = 24
+float_size = 0.6000000238418579
+xwayland = true
+scroll_workspaces = true
+
+[decoration]
+rounding = 12
+active_opacity = 1.0
+inactive_opacity = 0.9399999976158142
+dim_inactive = 0.0
+
+[decoration.blur]
+enabled = true
+size = 14
+passes = 3
+
+[decoration.shadow]
+enabled = true
+range = 12
+color = "#171a20aa"
+
+[animations]
+enabled = true
+
+[[animations.curves]]
+name = "ease"
+kind = "bezier"
+x1 = 0.25
+y1 = 1.0
+x2 = 0.5
+y2 = 1.0
+mass = 0.699999988079071
+stiffness = 130.0
+dampening = 16.0
+
+[[animations.curves]]
+name = "snap"
+kind = "bezier"
+x1 = 0.15000000596046448
+y1 = 0.0
+x2 = 0.10000000149011612
+y2 = 1.0
+mass = 0.699999988079071
+stiffness = 130.0
+dampening = 16.0
+
+[[animations.curves]]
+name = "soft"
+kind = "bezier"
+x1 = 0.4000000059604645
+y1 = 0.0
+x2 = 0.20000000298023224
+y2 = 1.0
+mass = 0.699999988079071
+stiffness = 130.0
+dampening = 16.0
+
+[[animations.curves]]
+name = "linear"
+kind = "bezier"
+x1 = 0.0
+y1 = 0.0
+x2 = 1.0
+y2 = 1.0
+mass = 0.699999988079071
+stiffness = 130.0
+dampening = 16.0
+
+[[animations.curves]]
+name = "spring"
+kind = "spring"
+x1 = 0.25
+y1 = 1.0
+x2 = 0.5
+y2 = 1.0
+mass = 0.699999988079071
+stiffness = 130.0
+dampening = 16.0
+
+[[animations.curves]]
+name = "bounce"
+kind = "spring"
+x1 = 0.25
+y1 = 1.0
+x2 = 0.5
+y2 = 1.0
+mass = 0.6000000238418579
+stiffness = 170.0
+dampening = 9.0
+
+[animations.windows]
+enabled = true
+speed = 4.0
+curve = "spring"
+style = ""
+
+[animations.windows_in]
+enabled = true
+speed = 3.5999999046325684
+curve = "spring"
+style = "gnomed"
+
+[animations.windows_out]
+enabled = true
+speed = 2.200000047683716
+curve = "spring"
+style = "gnomed"
+
+[animations.fade_in]
+enabled = true
+speed = 3.0
+curve = "ease"
+style = ""
+
+[animations.fade_out]
+enabled = true
+speed = 2.0999999046325684
+curve = "ease"
+style = ""
+
+[animations.workspaces]
+enabled = true
+speed = 4.5
+curve = "spring"
+style = "slide"
+
+[animations.border]
+enabled = true
+speed = 4.0
+curve = "ease"
+style = ""
+
+[input]
+kb_layout = "be"
+kb_variant = ""
+kb_options = ""
+repeat_rate = 25
+repeat_delay = 600
+natural_scroll = true
+tap_to_click = true
+disable_while_typing = true
+sensitivity = 0.0
+accel_profile = "flat"
+scroll_factor = 1.0
+numlock_on_start = false
+
+[layout]
+master_factor = 0.550000011920929
+split_ratio = 0.5
+
+[[bind]]
+mods = "SUPER"
+key = "q"
+
+[bind.action]
+type = "exec"
+arg = "oxide-ctl terminal"
+
+[[bind]]
+mods = "SUPER"
+key = "c"
+
+[bind.action]
+type = "close"
+
+[[bind]]
+mods = "SUPER"
+key = "m"
+
+[bind.action]
+type = "quit"
+
+[[bind]]
+mods = "SUPER"
+key = "e"
+
+[bind.action]
+type = "exec"
+arg = "oxide-ctl files"
+
+[[bind]]
+mods = "SUPER"
+key = "v"
+
+[bind.action]
+type = "toggle_floating"
+
+[[bind]]
+mods = "SUPER"
+key = "f"
+
+[bind.action]
+type = "toggle_fullscreen"
+
+[[bind]]
+mods = "SUPER"
+key = "r"
+
+[bind.action]
+type = "exec"
+arg = "oxide-ctl launcher"
+
+[[bind]]
+mods = "ALT"
+key = "space"
+
+[bind.action]
+type = "exec"
+arg = "oxide-ctl launcher"
+
+[[bind]]
+mods = "SUPER"
+key = "comma"
+
+[bind.action]
+type = "exec"
+arg = "oxide-settings"
+
+[[bind]]
+mods = "SUPER"
+key = "a"
+
+[bind.action]
+type = "exec"
+arg = "oxide-ctl ipc ai toggle"
+
+[[bind]]
+mods = "SUPER"
+key = "z"
+
+[bind.action]
+type = "exec"
+arg = "oxide-ctl ipc shell toggleControl"
+
+[[bind]]
+mods = "SUPER"
+key = "o"
+
+[bind.action]
+type = "exec"
+arg = "oxide-ctl ipc shell toggleWindow"
+
+[[bind]]
+mods = "SUPER"
+key = "d"
+
+[bind.action]
+type = "exec"
+arg = "oxide-ctl ipc shell toggleLauncher"
+
+[[bind]]
+mods = "ALT"
+key = "j"
+
+[bind.action]
+type = "send_key"
+arg = "Left"
+
+[[bind]]
+mods = "ALT"
+key = "k"
+
+[bind.action]
+type = "send_key"
+arg = "Down"
+
+[[bind]]
+mods = "ALT"
+key = "i"
+
+[bind.action]
+type = "send_key"
+arg = "Up"
+
+[[bind]]
+mods = "ALT"
+key = "l"
+
+[bind.action]
+type = "send_key"
+arg = "Right"
+
+[[bind]]
+mods = "ALT+SHIFT"
+key = "j"
+
+[bind.action]
+type = "send_key"
+arg = "shift+Left"
+
+[[bind]]
+mods = "ALT+SHIFT"
+key = "k"
+
+[bind.action]
+type = "send_key"
+arg = "shift+Down"
+
+[[bind]]
+mods = "ALT+SHIFT"
+key = "i"
+
+[bind.action]
+type = "send_key"
+arg = "shift+Up"
+
+[[bind]]
+mods = "ALT+SHIFT"
+key = "l"
+
+[bind.action]
+type = "send_key"
+arg = "shift+Right"
+
+[[bind]]
+mods = "ALT+CTRL"
+key = "j"
+
+[bind.action]
+type = "send_key"
+arg = "ctrl+Left"
+
+[[bind]]
+mods = "ALT+CTRL"
+key = "l"
+
+[bind.action]
+type = "send_key"
+arg = "ctrl+Right"
+
+[[bind]]
+mods = "SUPER+SHIFT"
+key = "v"
+
+[bind.action]
+type = "exec"
+arg = "oxide-ctl ipc shell toggleClipboard"
+
+[[bind]]
+mods = "SUPER+SHIFT"
+key = "x"
+
+[bind.action]
+type = "exec"
+arg = "oxide-ctl lock"
+
+[[bind]]
+mods = "SUPER"
+key = "n"
+
+[bind.action]
+type = "exec"
+arg = "oxide-ctl lock"
+
+[[bind]]
+mods = ""
+key = "Print"
+
+[bind.action]
+type = "exec"
+arg = 'grim -g "$(slurp)" - | wl-copy'
+
+[[bind]]
+mods = "SUPER"
+key = "Left"
+
+[bind.action]
+type = "focus_dir"
+arg = "left"
+
+[[bind]]
+mods = "SUPER"
+key = "Right"
+
+[bind.action]
+type = "focus_dir"
+arg = "right"
+
+[[bind]]
+mods = "SUPER"
+key = "Up"
+
+[bind.action]
+type = "focus_dir"
+arg = "up"
+
+[[bind]]
+mods = "SUPER"
+key = "Down"
+
+[bind.action]
+type = "focus_dir"
+arg = "down"
+
+[[bind]]
+mods = "SUPER"
+key = "j"
+
+[bind.action]
+type = "focus_dir"
+arg = "left"
+
+[[bind]]
+mods = "SUPER"
+key = "l"
+
+[bind.action]
+type = "focus_dir"
+arg = "right"
+
+[[bind]]
+mods = "SUPER"
+key = "i"
+
+[bind.action]
+type = "focus_dir"
+arg = "up"
+
+[[bind]]
+mods = "SUPER"
+key = "k"
+
+[bind.action]
+type = "focus_dir"
+arg = "down"
+
+[[bind]]
+mods = "SUPER+CTRL"
+key = "j"
+
+[bind.action]
+type = "move_dir"
+arg = "left"
+
+[[bind]]
+mods = "SUPER+CTRL"
+key = "l"
+
+[bind.action]
+type = "move_dir"
+arg = "right"
+
+[[bind]]
+mods = "SUPER+CTRL"
+key = "i"
+
+[bind.action]
+type = "move_dir"
+arg = "up"
+
+[[bind]]
+mods = "SUPER+CTRL"
+key = "k"
+
+[bind.action]
+type = "move_dir"
+arg = "down"
+
+[[bind]]
+mods = "SUPER+SHIFT"
+key = "l"
+
+[bind.action]
+type = "workspace_rel"
+arg = 1
+
+[[bind]]
+mods = "SUPER+SHIFT"
+key = "j"
+
+[bind.action]
+type = "workspace_rel"
+arg = -1
+
+[[bind]]
+mods = "SUPER+SHIFT+ALT"
+key = "l"
+
+[bind.action]
+type = "move_to_workspace_rel"
+arg = 1
+
+[[bind]]
+mods = "SUPER+SHIFT+ALT"
+key = "j"
+
+[bind.action]
+type = "move_to_workspace_rel"
+arg = -1
+
+[[bind]]
+mods = "ALT"
+key = "Tab"
+
+[bind.action]
+type = "toggle_special"
+
+[[bind]]
+mods = "SUPER+SHIFT"
+key = "s"
+
+[bind.action]
+type = "move_to_special"
+
+[[bind]]
+mods = "SUPER"
+key = "space"
+
+[bind.action]
+type = "cycle_layout"
+
+[[bind]]
+mods = "SUPER"
+key = "minus"
+
+[bind.action]
+type = "shrink_master"
+
+[[bind]]
+mods = "SUPER"
+key = "equal"
+
+[bind.action]
+type = "grow_master"
+
+[[bind]]
+mods = "SUPER+SHIFT"
+key = "r"
+
+[bind.action]
+type = "reload_config"
+
+[[bind]]
+mods = "SUPER+SHIFT"
+key = "Left"
+
+[bind.action]
+type = "focus_monitor"
+arg = "left"
+
+[[bind]]
+mods = "SUPER+SHIFT"
+key = "Right"
+
+[bind.action]
+type = "focus_monitor"
+arg = "right"
+
+[[bind]]
+mods = "SUPER+CTRL"
+key = "Left"
+
+[bind.action]
+type = "move_to_monitor"
+arg = "left"
+
+[[bind]]
+mods = "SUPER+CTRL"
+key = "Right"
+
+[bind.action]
+type = "move_to_monitor"
+arg = "right"
+
+[[bind]]
+mods = ""
+key = "XF86AudioRaiseVolume"
+
+[bind.action]
+type = "exec"
+arg = "wpctl set-volume -l 1 @DEFAULT_AUDIO_SINK@ 5%+ || pactl set-sink-volume @DEFAULT_SINK@ +5%"
+
+[[bind]]
+mods = ""
+key = "XF86AudioLowerVolume"
+
+[bind.action]
+type = "exec"
+arg = "wpctl set-volume @DEFAULT_AUDIO_SINK@ 5%- || pactl set-sink-volume @DEFAULT_SINK@ -5%"
+
+[[bind]]
+mods = ""
+key = "XF86AudioMute"
+
+[bind.action]
+type = "exec"
+arg = "wpctl set-mute @DEFAULT_AUDIO_SINK@ toggle || pactl set-sink-mute @DEFAULT_SINK@ toggle"
+
+[[bind]]
+mods = ""
+key = "XF86AudioMicMute"
+
+[bind.action]
+type = "exec"
+arg = "wpctl set-mute @DEFAULT_AUDIO_SOURCE@ toggle || pactl set-source-mute @DEFAULT_SOURCE@ toggle"
+
+[[bind]]
+mods = ""
+key = "XF86MonBrightnessUp"
+
+[bind.action]
+type = "exec"
+arg = "brightnessctl -e4 -n2 set 5%+"
+
+[[bind]]
+mods = ""
+key = "XF86MonBrightnessDown"
+
+[bind.action]
+type = "exec"
+arg = "brightnessctl -e4 -n2 set 5%-"
+
+[[bind]]
+mods = ""
+key = "XF86AudioNext"
+
+[bind.action]
+type = "exec"
+arg = "playerctl next"
+
+[[bind]]
+mods = ""
+key = "XF86AudioPause"
+
+[bind.action]
+type = "exec"
+arg = "playerctl play-pause"
+
+[[bind]]
+mods = ""
+key = "XF86AudioPlay"
+
+[bind.action]
+type = "exec"
+arg = "playerctl play-pause"
+
+[[bind]]
+mods = ""
+key = "XF86AudioPrev"
+
+[bind.action]
+type = "exec"
+arg = "playerctl previous"
+
+[[bind]]
+mods = "SUPER"
+key = "1"
+
+[bind.action]
+type = "workspace"
+arg = 1
+
+[[bind]]
+mods = "SUPER+SHIFT"
+key = "1"
+
+[bind.action]
+type = "move_to_workspace"
+arg = 1
+
+[[bind]]
+mods = "SUPER"
+key = "2"
+
+[bind.action]
+type = "workspace"
+arg = 2
+
+[[bind]]
+mods = "SUPER+SHIFT"
+key = "2"
+
+[bind.action]
+type = "move_to_workspace"
+arg = 2
+
+[[bind]]
+mods = "SUPER"
+key = "3"
+
+[bind.action]
+type = "workspace"
+arg = 3
+
+[[bind]]
+mods = "SUPER+SHIFT"
+key = "3"
+
+[bind.action]
+type = "move_to_workspace"
+arg = 3
+
+[[bind]]
+mods = "SUPER"
+key = "4"
+
+[bind.action]
+type = "workspace"
+arg = 4
+
+[[bind]]
+mods = "SUPER+SHIFT"
+key = "4"
+
+[bind.action]
+type = "move_to_workspace"
+arg = 4
+
+[[bind]]
+mods = "SUPER"
+key = "5"
+
+[bind.action]
+type = "workspace"
+arg = 5
+
+[[bind]]
+mods = "SUPER+SHIFT"
+key = "5"
+
+[bind.action]
+type = "move_to_workspace"
+arg = 5
+
+[[bind]]
+mods = "SUPER"
+key = "6"
+
+[bind.action]
+type = "workspace"
+arg = 6
+
+[[bind]]
+mods = "SUPER+SHIFT"
+key = "6"
+
+[bind.action]
+type = "move_to_workspace"
+arg = 6
+
+[[bind]]
+mods = "SUPER"
+key = "7"
+
+[bind.action]
+type = "workspace"
+arg = 7
+
+[[bind]]
+mods = "SUPER+SHIFT"
+key = "7"
+
+[bind.action]
+type = "move_to_workspace"
+arg = 7
+
+[[bind]]
+mods = "SUPER"
+key = "8"
+
+[bind.action]
+type = "workspace"
+arg = 8
+
+[[bind]]
+mods = "SUPER+SHIFT"
+key = "8"
+
+[bind.action]
+type = "move_to_workspace"
+arg = 8
+
+[[bind]]
+mods = "SUPER"
+key = "9"
+
+[bind.action]
+type = "workspace"
+arg = 9
+
+[[bind]]
+mods = "SUPER+SHIFT"
+key = "9"
+
+[bind.action]
+type = "move_to_workspace"
+arg = 9
+
+[shell]
+enabled = true
+active = "oxide"
+
+[theme]
+preset = "oxide"
+kitty = true
+mode = "dark"
+roundness = 8
+apps = true
+
+[own]
+shell = false
+kitty = false
+fish = false
+gtk = false
+
+[terminal]
+font = "monospace"
+font_size = 12.0
+opacity = 0.949999988079071
+padding = 10
+cursor = "beam"
+scrollback = 10000
+greeting = false
+
+[[mouse_bind]]
+mods = "SUPER"
+button = "left"
+action = "move_window"
+
+[[mouse_bind]]
+mods = "SUPER"
+button = "right"
+action = "resize_window"
+
+[[rule]]
+app_id = "codium"
+opacity = 0.9200000166893005
+
+[[rule]]
+app_id = "codium-url-handler"
+opacity = 0.9200000166893005
+
+[[rule]]
+app_id = "VSCodium"
+opacity = 0.9200000166893005
+
+[[rule]]
+app_id = "code"
+opacity = 0.9200000166893005

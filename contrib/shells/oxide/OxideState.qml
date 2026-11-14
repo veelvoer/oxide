@@ -1,0 +1,76 @@
+// Live state of the Oxide compositor.
+//
+// Oxide listens on $XDG_RUNTIME_DIR/oxide.sock (newline separated JSON). We connect once and send
+// {"cmd":"subscribe"}: Oxide answers with the current state and then pushes a new line on every change
+// (workspace switch, focus change, new window, title change ...). To make Oxide do something, run
+// `oxide-ctl` (see dispatch() below).
+pragma Singleton
+import Quickshell
+import Quickshell.Io
+import QtQuick
+
+Singleton {
+    id: root
+
+    property bool connected: false
+    property int active: 1
+    property string layout: ""
+    property var workspaces: []     // [{id, windows, visible, special}]
+    property var focused: null      // {app_id, title} or null
+    property var windows: []
+    property var outputs: []
+    // the screen new popups open on: the one the pointer / focus is on
+    readonly property var activeScreen: {
+        const o = outputs.find(o => o.focused);
+        return (o && Quickshell.screens.find(s => s.name === o.name)) || Quickshell.screens[0];
+    }
+    function workspaceOn(screenName) {
+        const o = outputs.find(o => o.name === screenName);
+        return o && o.workspace ? o.workspace : active;
+    }
+
+    // Ask Oxide to run an action, e.g. dispatch({type: "workspace", arg: 3}) or dispatch({type: "close"}).
+    function dispatch(action) {
+        ctl.command = ["oxide-ctl", "dispatch", JSON.stringify(action)];
+        ctl.running = true;
+    }
+    function workspace(n) { dispatch({ "type": "workspace", "arg": n }); }
+
+    Socket {
+        id: sock
+        path: Quickshell.env("OXIDE_SOCKET") || (Quickshell.env("XDG_RUNTIME_DIR") + "/oxide.sock")
+        connected: true
+        onConnectedChanged: {
+            root.connected = connected;
+            if (connected) {
+                write("{\"cmd\":\"subscribe\"}\n");
+                flush();
+            }
+        }
+        parser: SplitParser {
+            onRead: line => {
+                try {
+                    const msg = JSON.parse(line);
+                    if (msg.status !== "state") return;
+                    const s = msg.state;
+                    root.active = s.active_workspace;
+                    root.layout = s.layout;
+                    root.workspaces = s.workspaces;
+                    root.focused = s.focused;
+                    root.windows = s.windows;
+                    root.outputs = s.outputs;
+                } catch (e) {
+                    console.log("oxide state: bad line", line);
+                }
+            }
+        }
+    }
+    // Oxide restarted, or is not up yet: keep trying.
+    Timer {
+        interval: 1000
+        running: !sock.connected
+        repeat: true
+        onTriggered: sock.connected = true
+    }
+    Process { id: ctl }
+}

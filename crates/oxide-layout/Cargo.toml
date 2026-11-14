@@ -1,0 +1,8 @@
+[package]
+name = "oxide-layout"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+
+[dependencies]
+oxide-config = { path = "../oxide-config" }

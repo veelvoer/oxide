@@ -1,0 +1,6 @@
+[Desktop Entry]
+Name=Oxide
+Comment=Lightweight tiling Wayland compositor
+Exec=oxide-session
+Type=Application
+DesktopNames=oxide

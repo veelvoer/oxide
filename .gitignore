@@ -1,0 +1,7 @@
+/target
+*.log
+*.orig
+*.rej
+.DS_Store
+# local reference material
+/Oxide Settings-png_1/

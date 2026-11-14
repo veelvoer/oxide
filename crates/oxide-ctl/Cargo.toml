@@ -1,0 +1,10 @@
+[package]
+name = "oxide-ctl"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+
+[dependencies]
+oxide-ipc = { path = "../oxide-ipc" }
+serde_json.workspace = true
+oxide-config = { path = "../oxide-config" }

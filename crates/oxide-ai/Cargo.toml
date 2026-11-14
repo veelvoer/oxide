@@ -1,0 +1,13 @@
+[package]
+name = "oxide-ai"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+oxide-config = { path = "../oxide-config" }
+oxide-ipc = { path = "../oxide-ipc" }
+serde.workspace = true
+serde_json.workspace = true
+ureq = { version = "2", features = ["json"] }
+base64 = "0.22"

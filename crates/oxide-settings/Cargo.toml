@@ -1,0 +1,13 @@
+[package]
+name = "oxide-settings"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+oxide-config = { path = "../oxide-config" }
+oxide-ipc = { path = "../oxide-ipc" }
+egui_extras = { version = "0.37", default-features = false, features = ["svg", "file", "image"] }
+image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
+eframe = { version = "0.37", default-features = false, features = ["glow", "wayland", "x11", "default_fonts"] }
+serde_json.workspace = true

@@ -1,0 +1,24 @@
+[workspace]
+resolver = "2"
+members = ["crates/*"]
+
+[workspace.package]
+version = "0.2.0"
+edition = "2021"
+license = "GPL-3.0-or-later"
+
+[workspace.dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "0.8"
+
+[profile.release]
+lto = "fat"
+codegen-units = 1
+strip = true
+opt-level = 3
+
+# smithay 0.7 kills clients that commit after destroying a layer surface with size 0 (patched in vendor/smithay,
+# see wlr_layer/handlers.rs); Quickshell does exactly that when a popup closes.
+[patch.crates-io]
+smithay = { path = "vendor/smithay" }

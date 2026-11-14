@@ -1,0 +1,40 @@
+singleton Theme Theme.qml
+singleton BarConfig BarConfig.qml
+singleton OxideState OxideState.qml
+singleton Sys Sys.qml
+Txt Txt.qml
+Icon Icon.qml
+IconButton IconButton.qml
+Pop Pop.qml
+PillSlider PillSlider.qml
+Chip Chip.qml
+Toggle Toggle.qml
+WindowOptions WindowOptions.qml
+Lane Lane.qml
+Bar Bar.qml
+ControlCenter ControlCenter.qml
+Calendar Calendar.qml
+Notifications Notifications.qml
+Launcher Launcher.qml
+AIClient AIClient.qml
+AIPanel AIPanel.qml
+ModLauncher ModLauncher.qml
+ModWorkspaces ModWorkspaces.qml
+ModWindow ModWindow.qml
+ModClock ModClock.qml
+ModMedia ModMedia.qml
+ModTray ModTray.qml
+ModStatus ModStatus.qml
+ModBell ModBell.qml
+ModAssistant ModAssistant.qml
+ModPower ModPower.qml
+ModCpu ModCpu.qml
+ModMemory ModMemory.qml
+ModSpacer ModSpacer.qml
+ModSeparator ModSeparator.qml
+LanePill LanePill.qml
+Wallpaper Wallpaper.qml
+ModClipboard ModClipboard.qml
+Clipboard Clipboard.qml
+NotificationCenter NotificationCenter.qml
+LockScreen LockScreen.qml
