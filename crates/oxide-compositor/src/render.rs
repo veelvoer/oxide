@@ -78,6 +78,10 @@ impl Oxide {
         if self.animations_running() {
             self.tick_animations();
         }
+        // telemetry borders that pulse keep frames coming (only while one does)
+        if self.telemetry_animating() {
+            self.dirty = true;
+        }
         if !self.shaders_tried {
             self.shaders_tried = true;
             self.shaders = crate::shaders::Shaders::compile(renderer);
@@ -107,6 +111,22 @@ impl Oxide {
                     render_elements_from_surface_tree(renderer, ls.wl_surface(), (0, 0), scale, 1.0, Kind::Unspecified);
                 out.extend(els.into_iter().map(OxideElement::from));
             }
+            return out;
+        }
+
+        // the overview replaces windows and the bar; the wallpaper stays behind it
+        if let Some(mi) = self.monitors.iter().position(|m| &m.output == output).filter(|&mi| self.overview_active_on(mi)) {
+            self.overview_elements(renderer, mi, scale, &mut out);
+            let layer_map = layer_map_for_output(output);
+            out.extend(
+                layer_map
+                    .layers()
+                    .rev()
+                    .filter(|l| matches!(l.layer(), Layer::Background | Layer::Bottom))
+                    .filter_map(|l| layer_map.layer_geometry(l).map(|g| (g.loc, l)))
+                    .flat_map(|(loc, l)| AsRenderElements::<GlesRenderer>::render_elements::<Surf>(l, renderer, loc.to_physical_precise_round(scale), scale, 1.0))
+                    .map(OxideElement::from),
+            );
             return out;
         }
 
@@ -163,8 +183,20 @@ impl Oxide {
         let list = self.render_list(output);
         self.closing_elements(renderer, output, geo, scale, &mut out);
         let blur_tex = self.update_blur(renderer, output, &lower);
+        // a scratchpad group sits above a dimmed workspace
+        let overlay = self.monitors.iter().find(|m| &m.output == output).and_then(|m| m.overlay);
+        let mut scrim_done = overlay.is_none();
         for (wi, dx) in list.into_iter().rev() {
+            if !scrim_done && Some(self.wins[wi].ws) != overlay {
+                scrim_done = true;
+                self.scrim.update(geo.size, [0.0, 0.0, 0.0, 0.38]);
+                out.push(SolidColorRenderElement::from_buffer(&self.scrim, (0, 0), scale, 1.0, Kind::Unspecified).into());
+            }
             self.window_elements(renderer, wi, dx, geo, scale, blur_tex.as_ref(), &mut out);
+        }
+        if !scrim_done {
+            self.scrim.update(geo.size, [0.0, 0.0, 0.0, 0.38]);
+            out.push(SolidColorRenderElement::from_buffer(&self.scrim, (0, 0), scale, 1.0, Kind::Unspecified).into());
         }
         let _ = fullscreen;
 
@@ -292,8 +324,27 @@ impl Oxide {
     }
 
     /// Border gradient uniforms for the given mix (0 = inactive color, 1 = active gradient).
-    fn border_uniforms(&self, mix: f32, fade: f32, radius: i32, b: i32) -> Vec<smithay::backend::renderer::gles::Uniform<'static>> {
+    fn border_uniforms(&self, mix: f32, fade: f32, radius: i32, b: i32, sig: Option<(crate::telemetry::Sig, std::time::Instant)>) -> Vec<smithay::backend::renderer::gles::Uniform<'static>> {
         let g = &self.config.general;
+        // telemetry: which effect, its color, and the clock it runs on
+        let (mode, phase, gcol, heat, hcol) = if self.config.decoration.telemetry {
+            use crate::telemetry::Sig;
+            let pal = oxide_config::theme::palette(&self.config.theme);
+            let c = |h: &str| parse_color(h).unwrap_or([1.0, 1.0, 1.0, 1.0]);
+            let now = std::time::Instant::now();
+            let clock: Duration = self.clock.now().into();
+            let (mode, col, phase) = match sig {
+                Some((Sig::Error, _)) => (1.0, c(&pal.bad), clock.as_secs_f32()),
+                Some((Sig::Busy, _)) => (2.0, c(&pal.accent_soft), clock.as_secs_f32()),
+                Some((Sig::Call, _)) => (3.0, c(&pal.good), clock.as_secs_f32()),
+                Some((Sig::Ok, t)) => (4.0, c(&pal.good), now.duration_since(t).as_secs_f32()),
+                _ => (0.0, [0.0; 4], 0.0),
+            };
+            let heat = ((self.cpu_load - 0.55) / 0.45).clamp(0.0, 1.0) * 0.6;
+            (mode, phase, premul(col, fade), heat, premul(c(&pal.warn), fade))
+        } else {
+            (0.0, 0.0, [0.0; 4], 0.0, [0.0; 4])
+        };
         let fix = |c: [f32; 4]| premul(c, fade);
         let cols: Vec<[f32; 4]> =
             g.active_border.iter().filter_map(|s| parse_color(s)).take(4).collect();
@@ -311,6 +362,11 @@ impl Oxide {
             uniform_4f("c2", col(2)),
             uniform_4f("c3", col(3)),
             uniform_4f("inactive", fix(parse_color(&g.inactive_border).unwrap_or([0.3, 0.3, 0.4, 0.7]))),
+            uniform_f("mode", mode),
+            uniform_f("phase", phase),
+            uniform_4f("gcol", gcol),
+            uniform_f("heat", heat),
+            uniform_4f("hcol", hcol),
         ]
     }
 
@@ -330,7 +386,7 @@ impl Oxide {
         let focused = self.focus.as_ref() == Some(&self.wins[wi].window);
         let border_uniforms = {
             let w = &self.wins[wi];
-            self.border_uniforms(w.border_mix, w.fade, if w.fullscreen { 0 } else { dec.rounding.max(0) }, if w.fullscreen { 0 } else { w.border })
+            self.border_uniforms(w.border_mix, w.fade, if w.fullscreen { 0 } else { dec.rounding.max(0) }, if w.fullscreen { 0 } else { w.border }, w.signal)
         };
         let w = &mut self.wins[wi];
         let fullscreen = w.fullscreen;
@@ -540,7 +596,7 @@ impl Oxide {
             }
             if b > 0 {
                 let area = Rectangle::new(outer_loc, outer.size);
-                let u = self.border_uniforms(c.border_mix, fade, c.radius, b);
+                let u = self.border_uniforms(c.border_mix, fade, c.radius, b, None);
                 out.push(PixelShaderElement::new(sh.border.clone(), area, None, 1.0, u, Kind::Unspecified).into());
             }
             if dec.shadow.enabled {

@@ -19,6 +19,9 @@ Singleton {
     property var focused: null      // {app_id, title} or null
     property var windows: []
     property var outputs: []
+    // the config file has an error ({message, line, path}) or null; Super held alone (ambient HUD)
+    property var configError: null
+    property bool superHeld: false
     // the screen new popups open on: the one the pointer / focus is on
     readonly property var activeScreen: {
         const o = outputs.find(o => o.focused);
@@ -59,6 +62,8 @@ Singleton {
                     root.focused = s.focused;
                     root.windows = s.windows;
                     root.outputs = s.outputs;
+                    root.configError = s.config_error || null;
+                    root.superHeld = !!s.super_held;
                 } catch (e) {
                     console.log("oxide state: bad line", line);
                 }

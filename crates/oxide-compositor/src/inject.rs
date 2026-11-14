@@ -144,6 +144,12 @@ impl Oxide {
                 pointer.frame(self);
             }
             InputCmd::Key { name, mods } => self.tap_key(&name, &mods)?,
+            InputCmd::KeyState { name, pressed } => {
+                let sym = xkb::keysym_from_name(&name, xkb::KEYSYM_CASE_INSENSITIVE);
+                let (key, _) = self.keycode_for(sym).ok_or_else(|| format!("key {name:?} is not on the keyboard layout"))?;
+                let t = self.now_ms();
+                self.key_event(key, if pressed { KeyState::Pressed } else { KeyState::Released }, t);
+            }
             InputCmd::Type { text } => {
                 for ch in text.chars() {
                     let name = match ch {

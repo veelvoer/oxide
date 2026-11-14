@@ -1,5 +1,9 @@
 mod anim;
 mod autotheme;
+mod confwatch;
+mod groups;
+mod overview;
+mod telemetry;
 mod blur;
 mod cursor;
 mod drm;

@@ -81,6 +81,55 @@ pub fn compute(kind: LayoutKind, area: Rect, n: usize, split_ratio: f32, master_
 }
 
 /// Inset tiles: `gaps_out` against the area edge, `gaps_in` between tiles.
+/// Like `compute`, but window `hot` (one that needs attention: a failed build, a call) gets `weight` of the space it
+/// shares, so it grows without you resizing anything. Every window still gets some room.
+pub fn compute_weighted(kind: LayoutKind, area: Rect, n: usize, split_ratio: f32, master_factor: f32, hot: Option<usize>, weight: f32) -> Vec<Rect> {
+    let Some(h) = hot.filter(|&h| h < n && n > 1) else { return compute(kind, area, n, split_ratio, master_factor) };
+    let weight = weight.clamp(0.5, 0.85);
+    match kind {
+        LayoutKind::Dwindle => {
+            let mut out = Vec::with_capacity(n);
+            let mut rest = area;
+            for i in 0..n {
+                if i == n - 1 {
+                    out.push(rest);
+                    break;
+                }
+                // the split that separates the hot window from the others leans its way
+                let ratio = if i == h { weight } else if i < h { 1.0 - weight } else { split_ratio.clamp(0.1, 0.9) };
+                if rest.w >= rest.h {
+                    let w = (rest.w as f32 * ratio) as i32;
+                    out.push(Rect::new(rest.x, rest.y, w, rest.h));
+                    rest = Rect::new(rest.x + w, rest.y, rest.w - w, rest.h);
+                } else {
+                    let hh = (rest.h as f32 * ratio) as i32;
+                    out.push(Rect::new(rest.x, rest.y, rest.w, hh));
+                    rest = Rect::new(rest.x, rest.y + hh, rest.w, rest.h - hh);
+                }
+            }
+            out
+        }
+        LayoutKind::Master => {
+            if h == 0 {
+                return master(area, n, weight);
+            }
+            let mw = (area.w as f32 * (1.0 - weight)) as i32;
+            let mut out = vec![Rect::new(area.x, area.y, mw, area.h)];
+            let stack = n - 1;
+            // the hot one takes `weight` of the stack height, the others share the rest
+            let hot_h = if stack == 1 { area.h } else { (area.h as f32 * weight) as i32 };
+            let other_h = if stack > 1 { (area.h - hot_h) / (stack as i32 - 1) } else { 0 };
+            let mut y = area.y;
+            for i in 1..n {
+                let hh = if i == n - 1 { area.bottom() - y } else if i == h { hot_h } else { other_h };
+                out.push(Rect::new(area.x + mw, y, area.w - mw, hh));
+                y += hh;
+            }
+            out
+        }
+    }
+}
+
 pub fn apply_gaps(rects: &[Rect], area: Rect, gaps_in: i32, gaps_out: i32) -> Vec<Rect> {
     let half = gaps_in / 2;
     rects
@@ -144,6 +193,23 @@ mod tests {
         let r = apply_gaps(&[A], A, 5, 10);
         assert_eq!(r[0], Rect::new(10, 10, 980, 580));
     }
+    #[test]
+    fn weighted_grows_the_hot_window_and_covers_the_area() {
+        let a = Rect::new(0, 0, 1000, 600);
+        for kind in [LayoutKind::Dwindle, LayoutKind::Master] {
+            for n in 2..5 {
+                for hot in 0..n {
+                    let r = compute_weighted(kind, a, n, 0.5, 0.55, Some(hot), 0.6);
+                    assert_eq!(r.len(), n);
+                    assert_eq!(area_sum(&r), 600_000, "{kind:?} n={n} hot={hot}");
+                    let plain = compute(kind, a, n, 0.5, 0.55);
+                    let (rh, ph) = (r[hot].w as i64 * r[hot].h as i64, plain[hot].w as i64 * plain[hot].h as i64);
+                    assert!(rh >= ph, "{kind:?} n={n} hot={hot}: {rh} < {ph}");
+                }
+            }
+        }
+    }
+
     #[test]
     fn nav() {
         let r = master(A, 3, 0.5);

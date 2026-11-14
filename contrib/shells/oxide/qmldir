@@ -6,6 +6,9 @@ Txt Txt.qml
 Icon Icon.qml
 IconButton IconButton.qml
 Pop Pop.qml
+Dock Dock.qml
+Hud Hud.qml
+ConfigError ConfigError.qml
 PillSlider PillSlider.qml
 Chip Chip.qml
 Toggle Toggle.qml

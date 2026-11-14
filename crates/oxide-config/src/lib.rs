@@ -11,6 +11,8 @@ pub mod theme;
 
 /// Workspace id used for the special (scratchpad) workspace.
 pub const SPECIAL_WS: u32 = 100;
+/// Workspaces of macro scratchpads: GROUP_WS + the scratchpad's index (never listed as normal workspaces).
+pub const GROUP_WS: u32 = 200;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(default)]
@@ -33,6 +35,9 @@ pub struct Config {
     pub mouse_binds: Vec<MouseBind>,
     #[serde(rename = "rule")]
     pub rules: Vec<WindowRule>,
+    /// Macro scratchpads: groups of apps summoned and dismissed together with one key.
+    #[serde(rename = "scratchpad")]
+    pub scratchpads: Vec<Scratchpad>,
     pub exec_once: Vec<String>,
     pub env: Vec<(String, String)>,
 }
@@ -127,6 +132,10 @@ pub struct LayoutCfg {
     pub master_factor: f32,
     /// Dwindle: split ratio for new windows (0.1..0.9).
     pub split_ratio: f32,
+    /// A window that needs you (a build failed in it, it is in a call) grows without you resizing it.
+    pub context_aware: bool,
+    /// How much of its share such a window takes (0.5..0.85).
+    pub focus_weight: f32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -138,6 +147,9 @@ pub struct Decoration {
     pub blur: Blur,
     pub shadow: Shadow,
     pub dim_inactive: f32,
+    /// Borders that tell you something: a red pulse when a build fails, a sweep while it runs, a green flash when it
+    /// succeeds, a slow breath during a call, and a warmer focus border when the CPU is busy.
+    pub telemetry: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -335,6 +347,10 @@ pub enum Action {
     ReloadConfig,
     /// Press another key for the focused app, e.g. "alt+Left" or "ctrl+shift+t".
     SendKey(String),
+    /// Show or hide a macro scratchpad (by name).
+    ToggleScratchpad(String),
+    /// Zoom out to the overview of all workspaces (and back).
+    ToggleOverview,
     Quit,
 }
 
@@ -367,6 +383,31 @@ pub enum Dir {
     Right,
     Up,
     Down,
+}
+
+/// A group of windows that appears and disappears as one, arranged side by side over the current workspace.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct Scratchpad {
+    pub name: String,
+    pub apps: Vec<ScratchApp>,
+    /// Size of the group as a fraction of the screen.
+    pub width: f32,
+    pub height: f32,
+}
+
+impl Default for Scratchpad {
+    fn default() -> Self {
+        Self { name: String::new(), apps: vec![], width: 0.84, height: 0.72 }
+    }
+}
+
+/// One member of a scratchpad: the window to take (by app id) and how to start it when it is not open.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+#[serde(default)]
+pub struct ScratchApp {
+    pub app_id: String,
+    pub exec: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
@@ -415,7 +456,7 @@ fn one_or_many<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Vec<String>, D:
 
 impl Default for LayoutCfg {
     fn default() -> Self {
-        Self { master_factor: 0.55, split_ratio: 0.5 }
+        Self { master_factor: 0.55, split_ratio: 0.5, context_aware: true, focus_weight: 0.62 }
     }
 }
 impl Default for Decoration {
@@ -427,6 +468,7 @@ impl Default for Decoration {
             blur: Blur::default(),
             shadow: Shadow::default(),
             dim_inactive: 0.0,
+            telemetry: true,
         }
     }
 }
@@ -552,6 +594,7 @@ impl Default for Config {
             b("SUPER+SHIFT", "s", MoveToSpecial),
             // layout and monitors (Oxide specific)
             b("SUPER", "space", CycleLayout),
+            b("SUPER", "Tab", ToggleOverview),
             b("SUPER", "minus", ShrinkMaster),
             b("SUPER", "equal", GrowMaster),
             b("SUPER+SHIFT", "r", ReloadConfig),
@@ -592,6 +635,7 @@ impl Default for Config {
                 .iter()
                 .map(|c| WindowRule { app_id: Some((*c).into()), opacity: Some(0.92), ..WindowRule::default() })
                 .collect(),
+            scratchpads: vec![],
             exec_once: vec![],
             shell: ShellCfg::default(),
             theme: theme::ThemeCfg::default(),
@@ -608,6 +652,28 @@ pub enum Error {
     Parse(toml::de::Error),
     Ser(toml::ser::Error),
 }
+impl Error {
+    /// The line of the config file a parse error points at (1-based).
+    pub fn line(&self) -> Option<usize> {
+        match self {
+            Error::Parse(e) => {
+                let span = e.span()?;
+                let text = std::fs::read_to_string(Config::path()).ok()?;
+                Some(text.get(..span.start.min(text.len()))?.matches('\n').count() + 1)
+            }
+            _ => None,
+        }
+    }
+
+    /// The error without the source excerpt toml adds (for a one-line message).
+    pub fn short(&self) -> String {
+        match self {
+            Error::Parse(e) => e.message().trim().to_string(),
+            other => other.to_string(),
+        }
+    }
+}
+
 impl std::fmt::Display for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -679,7 +745,7 @@ impl Config {
 
     /// Older config files do not know the shell shortcuts: add them unless the key is taken.
     pub fn add_missing_shell_binds(&mut self) {
-        for d in Config::default().binds.into_iter().filter(|b| matches!(&b.action, Action::SendKey(_)) || matches!(&b.action, Action::Exec(c) if c.contains("active-shell") || c.starts_with("oxide-ctl ipc "))) {
+        for d in Config::default().binds.into_iter().filter(|b| matches!(&b.action, Action::SendKey(_)) || (matches!(&b.action, Action::Exec(c) if c.contains("active-shell") || c.starts_with("oxide-ctl ipc ")) || matches!(&b.action, Action::ToggleOverview))) {
             let taken = self.binds.iter().any(|b| b.mods.eq_ignore_ascii_case(&d.mods) && b.key.eq_ignore_ascii_case(&d.key));
             let has_action = self.binds.iter().any(|b| b.action == d.action);
             if !taken && !has_action {

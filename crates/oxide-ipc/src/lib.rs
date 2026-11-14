@@ -34,6 +34,9 @@ pub enum Request {
     /// Change what "always" happens to windows of an app (saved to the config file and applied to open windows):
     /// the set fields of `rule` replace the stored ones, the field names in `clear` are removed.
     SetRule { app_id: String, rule: oxide_config::WindowRule, clear: Vec<String> },
+    /// Tell Oxide about the state of a program, for the telemetry borders and context-aware layout:
+    /// `state` is "busy", "error", "ok" or "clear"; `pid` is a process inside the window (e.g. your shell).
+    Signal { pid: Option<u32>, state: String },
     /// Emergency: drop a screen lock whose locker is gone (also `oxide-ctl unlock` from another TTY).
     ForceUnlock,
 }
@@ -50,6 +53,8 @@ pub enum InputCmd {
     Scroll { dx: f64, dy: f64 },
     /// An xkb key name such as "Return", "Escape" or "a"; `mods` e.g. ["ctrl", "shift"].
     Key { name: String, mods: Vec<String> },
+    /// Press or release one key (to hold a modifier, e.g. Super for the HUD).
+    KeyState { name: String, pressed: bool },
     Type { text: String },
 }
 
@@ -74,6 +79,19 @@ pub struct State {
     pub focused: Option<FocusedWindow>,
     pub windows: Vec<WindowInfo>,
     pub outputs: Vec<OutputInfo>,
+    /// The config file has an error: Oxide keeps running with the last good settings until it is fixed.
+    #[serde(default)]
+    pub config_error: Option<ConfigProblem>,
+    /// The Super key is being held on its own (the shell shows its ambient HUD while it is).
+    #[serde(default)]
+    pub super_held: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ConfigProblem {
+    pub message: String,
+    pub line: Option<usize>,
+    pub path: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -100,6 +118,9 @@ pub struct WindowInfo {
     pub floating: bool,
     pub focused: bool,
     pub fullscreen: bool,
+    /// telemetry: "", "busy", "error", "ok", "call" or "audio"
+    #[serde(default)]
+    pub signal: String,
     /// What the config says should always happen to this app's windows (None = nothing).
     pub rule: Option<oxide_config::WindowRule>,
     /// Where the window is drawn right now (x, y, width, height); moves while animating.

@@ -24,12 +24,15 @@ install: build
 	cp -r contrib/shells/oxide $(DESTDIR)$(PREFIX)/share/oxide/shells/
 	cp -r contrib/wallpapers/. $(DESTDIR)$(PREFIX)/share/oxide/wallpapers/
 	install -Dm644 contrib/oxide.desktop $(DESTDIR)$(PREFIX)/share/wayland-sessions/oxide.desktop
+	install -Dm644 contrib/oxide-settings.desktop $(DESTDIR)$(PREFIX)/share/applications/oxide-settings.desktop
+	install -Dm644 contrib/branding/oxide-logo.svg $(DESTDIR)$(PREFIX)/share/icons/hicolor/scalable/apps/oxide-settings.svg
 	install -Dm644 LICENSE $(DESTDIR)$(PREFIX)/share/licenses/oxide/LICENSE
 
 uninstall:
 	for b in $(BINS) oxide-session; do rm -f $(DESTDIR)$(PREFIX)/bin/$$b; done
 	rm -rf $(DESTDIR)$(PREFIX)/share/oxide $(DESTDIR)$(PREFIX)/share/licenses/oxide
-	rm -f $(DESTDIR)$(PREFIX)/share/wayland-sessions/oxide.desktop
+	rm -f $(DESTDIR)$(PREFIX)/share/wayland-sessions/oxide.desktop $(DESTDIR)$(PREFIX)/share/applications/oxide-settings.desktop
+	rm -f $(DESTDIR)$(PREFIX)/share/icons/hicolor/scalable/apps/oxide-settings.svg
 
 test:
 	$(CARGO) test --release

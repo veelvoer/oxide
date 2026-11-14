@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Oxide Settings
+GenericName=Settings
+Comment=Wi-Fi, Bluetooth, sound, displays, theme, windows, shortcuts and more
+Exec=oxide-settings
+Icon=oxide-settings
+Terminal=false
+Categories=Settings;System;
+Keywords=settings;preferences;wifi;bluetooth;sound;display;theme;wallpaper;shortcuts;
+StartupWMClass=oxide-settings

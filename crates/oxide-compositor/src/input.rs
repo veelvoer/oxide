@@ -95,8 +95,18 @@ impl Oxide {
         let capturing = matches!(self.capture, Some(None));
         let bypass = self.bypass_binds;
 
-        let action = keyboard.input::<Option<Hit>, _>(self, keycode, state, serial, time, |_, mods, handle| {
+        let mut suppressed_esc = false;
+        let action = keyboard.input::<Option<Hit>, _>(self, keycode, state, serial, time, |st, mods, handle| {
             let Some(sym) = handle.raw_latin_sym_or_raw_current_sym() else { return FilterResult::Forward };
+            st.note_key_for_hud(sym.raw(), state == KeyState::Pressed);
+            // Escape zooms back in from the overview
+            if st.overview.is_some() && sym.raw() == keysyms::KEY_Escape {
+                if state == KeyState::Pressed {
+                    suppressed_esc = true;
+                    return FilterResult::Intercept(Some(Hit::Bind(Action::ToggleOverview)));
+                }
+                return FilterResult::Intercept(None);
+            }
             let modified = handle.modified_sym().raw();
             if (keysyms::KEY_XF86Switch_VT_1..=keysyms::KEY_XF86Switch_VT_12).contains(&modified) {
                 if state == KeyState::Pressed {
@@ -170,6 +180,7 @@ impl Oxide {
                 FilterResult::Forward
             }
         });
+        let _ = suppressed_esc;
         self.binds = binds;
         self.suppressed = suppressed;
         if state == KeyState::Released && self.send_repeat.is_some_and(|(k, _)| k == keycode.raw()) {
@@ -188,6 +199,32 @@ impl Oxide {
                 self.capture = if mods.is_empty() && key == "Escape" { None } else { Some(Some((mods, key))) };
             }
             None => {}
+        }
+    }
+
+    /// Super held on its own for a moment shows the ambient HUD; any other key (a shortcut) or letting go hides it.
+    pub fn note_key_for_hud(&mut self, sym: u32, pressed: bool) {
+        let is_super = sym == keysyms::KEY_Super_L || sym == keysyms::KEY_Super_R;
+        if is_super && pressed {
+            if self.super_down.is_none() {
+                self.super_down = Some(std::time::Instant::now());
+                self.super_combo = false;
+                let _ = self.loop_handle.insert_source(
+                    smithay::reexports::calloop::timer::Timer::from_duration(std::time::Duration::from_millis(220)),
+                    |_, _, st| {
+                        if st.super_down.is_some() && !st.super_combo && !st.super_held {
+                            st.super_held = true;
+                        }
+                        smithay::reexports::calloop::timer::TimeoutAction::Drop
+                    },
+                );
+            }
+        } else if is_super {
+            self.super_down = None;
+            self.super_held = false;
+        } else if pressed && self.super_down.is_some() {
+            self.super_combo = true;
+            self.super_held = false;
         }
     }
 
@@ -247,6 +284,14 @@ impl Oxide {
 
     pub fn button_event(&mut self, code: u32, state: ButtonState, time: u32) {
         let serial = SERIAL_COUNTER.next_serial();
+        // Super + click (drag a window) is a shortcut too: no HUD
+        if self.super_down.is_some() {
+            self.super_combo = true;
+            self.super_held = false;
+        }
+        if code == 0x110 && self.overview_button(state == ButtonState::Pressed) {
+            return;
+        }
         // interactive move/resize
         if let Some(d) = &self.drag {
             if state == ButtonState::Released && d.button == code {
@@ -368,6 +413,13 @@ impl Oxide {
             pointer.frame(self);
             self.update_drag(pos);
             self.dirty = true;
+            return;
+        }
+        // the overview takes the pointer: clients do not see it meanwhile
+        if self.overview_motion(pos) {
+            let pointer = self.pointer.clone();
+            pointer.motion(self, None, &MotionEvent { location: pos, serial, time });
+            pointer.frame(self);
             return;
         }
         let under = self.surface_under(pos);

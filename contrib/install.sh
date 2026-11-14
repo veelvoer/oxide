@@ -11,6 +11,9 @@ install -m755 "$T/oxide" "$T/oxide-ctl" "$T/oxide-settings" "$T/oxide-ai" contri
 rm -rf "$HOME/.local/share/oxide/shells/oxide"
 cp -r contrib/shells/oxide "$HOME/.local/share/oxide/shells/oxide"
 cp -r contrib/wallpapers/. "$HOME/.local/share/oxide/wallpapers/"
+# the settings app shows up in app launchers like any other app
+install -Dm644 contrib/oxide-settings.desktop "$HOME/.local/share/applications/oxide-settings.desktop"
+install -Dm644 contrib/branding/oxide-logo.svg "$HOME/.local/share/icons/hicolor/scalable/apps/oxide-settings.svg"
 # first install: give the user an editable copy; later runs leave their copy alone
 [ -d "$HOME/.config/oxide/shells/oxide" ] || cp -r contrib/shells/oxide "$HOME/.config/oxide/shells/oxide"
 echo "Installed to ~/.local/bin (make sure it is in PATH)."

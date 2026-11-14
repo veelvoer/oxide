@@ -90,6 +90,9 @@ pub fn fish_default(cfg: &Config) -> String {
     }
     o.push_str(&format!("set -g fish_color_selection --background={}\nset -g fish_pager_color_selected_background --background={}\n", c(&p.raised), c(&p.raised)));
     o.push_str("\nalias ll 'ls -la'\nalias .. 'cd ..'\nalias ... 'cd ../..'\n");
+    // telemetry: a long command that fails turns this window's border red (and makes it bigger); one that succeeds
+    // flashes it green. Runs only inside Oxide, and only for commands that took more than 3 seconds.
+    o.push_str("\nif set -q WAYLAND_DISPLAY; and command -q oxide-ctl\n    function __oxide_signal --on-event fish_postexec\n        set -l st $status\n        if test \"$CMD_DURATION\" -gt 3000\n            if test $st -eq 0\n                oxide-ctl signal ok --pid $fish_pid >/dev/null 2>&1 &\n            else\n                oxide-ctl signal error --pid $fish_pid >/dev/null 2>&1 &\n            end\n            disown 2>/dev/null\n        end\n    end\nend\n");
     o
 }
 

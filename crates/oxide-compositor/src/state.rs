@@ -77,6 +77,8 @@ pub struct Win {
     pub visible: bool,
     /// Opacity multiplier from window rules.
     pub opacity: Option<f32>,
+    /// what the window is doing (telemetry), since when
+    pub signal: Option<(crate::telemetry::Sig, std::time::Instant)>,
     /// Blur override from window rules.
     pub blur: Option<bool>,
     /// Identity of this window's blur element; renewed whenever the blurred texture changes.
@@ -116,6 +118,8 @@ pub struct Monitor {
     pub ws: u32,
     /// Workspace to return to when the special workspace is hidden.
     pub prev_ws: u32,
+    /// a macro scratchpad shown over this monitor's workspace (its workspace id)
+    pub overlay: Option<u32>,
 }
 
 pub struct CompiledBind {
@@ -178,6 +182,22 @@ pub struct Oxide {
     pub auto_stamp: String,
     /// render only the background layer (to read the colors of whatever wallpaper the shell draws)
     pub sampling_bg: bool,
+    /// the config file's last parse error (shown by the shell; the last good config stays active)
+    pub config_error: Option<oxide_ipc::ConfigProblem>,
+    pub config_mtime: Option<std::time::SystemTime>,
+    /// Super is down with no other key pressed since (the ambient HUD shows)
+    pub super_held: bool,
+    pub super_down: Option<std::time::Instant>,
+    pub super_combo: bool,
+    /// scratchpad apps that were started and are expected to map: (app id, group workspace, when)
+    pub group_pending: Vec<(String, u32, std::time::Instant)>,
+    /// dims the workspace behind a shown scratchpad group
+    pub scrim: SolidColorBuffer,
+    /// the zoom-out overview (Super+Tab), when open
+    pub overview: Option<crate::overview::Overview>,
+    /// system CPU load 0..1 and the window processes the telemetry thread watches
+    pub cpu_load: f32,
+    pub telemetry_pids: crate::telemetry::PidSet,
     /// frame recorder (test aid): directory, frames left, frames written
     pub recorder: Option<(String, u32, u32)>,
     /// held send-key bind: (physical keycode, generation) so it repeats like a real key
@@ -323,6 +343,16 @@ impl Oxide {
             bg_dirty: None,
             auto_stamp: String::new(),
             sampling_bg: false,
+            config_error: None,
+            config_mtime: None,
+            super_held: false,
+            super_down: None,
+            super_combo: false,
+            group_pending: vec![],
+            scrim: SolidColorBuffer::default(),
+            overview: None,
+            cpu_load: 0.0,
+            telemetry_pids: Default::default(),
             recorder: None,
             send_repeat: None,
             repeat_gen: 0,
@@ -491,12 +521,14 @@ impl Oxide {
         }
         let used: Vec<u32> = self.monitors.iter().map(|m| m.ws).collect();
         let ws = (1..).find(|n| !used.contains(n)).unwrap_or(1);
-        self.monitors.push(Monitor { output, ws, prev_ws: ws });
+        self.monitors.push(Monitor { output, ws, prev_ws: ws, overlay: None });
     }
 
     /// Run once the socket and ipc are up: env and autostart.
     pub fn startup(&mut self) {
         self.auto_theme_start();
+        self.config_watch_start();
+        self.telemetry_start();
         // theme files and app colors: helper tools are involved, so never on the compositor thread
         crate::render::set_clear(&oxide_config::theme::palette(&self.config.theme).bg);
         // kitty windows started from now on read the standard (or the user's own) configuration

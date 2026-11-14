@@ -70,6 +70,8 @@ ShellRoot {
     Calendar { mouseOpened: root.openedByMouse; shown: root.calendarShown; onDismissed: root.calendarShown = false }
     Launcher { shown: root.launcherShown; onDismissed: root.launcherShown = false }
     NotificationCenter { shell: root; mouseOpened: root.openedByMouse; shown: root.notifShown; onDismissed: root.notifShown = false }
+    Hud {}
+    ConfigError {}
     WindowOptions { shown: root.windowShown; onDismissed: root.windowShown = false }
     Clipboard { shown: root.clipboardShown; onDismissed: root.clipboardShown = false }
     AIPanel { id: aiPanel; ai: ai; shown: root.aiShown; onDismissed: root.aiShown = false }

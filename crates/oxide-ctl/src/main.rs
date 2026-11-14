@@ -4,7 +4,7 @@ use oxide_config::Action;
 use oxide_ipc::{call, Request, Response};
 
 fn usage() -> ! {
-    eprintln!("usage: oxide-ctl <input ...|restart-shell|subscribe|get-config|reload|unlock|lock|state|set <config.toml>|import-hyprland [file] [--write]|dispatch <json-action>|exec <cmd>|workspace <n>|rule <app> k=v..|terminal [cmd]|files|ipc <target> <fn>|doctor|default-config|quit>");
+    eprintln!("usage: oxide-ctl <input ...|restart-shell|subscribe|get-config|reload|unlock|lock|state|set <config.toml>|import-hyprland [file] [--write]|dispatch <json-action>|exec <cmd>|workspace <n>|rule <app> k=v..|terminal [cmd]|files|ipc <target> <fn>|doctor|edit-config [line]|signal <busy|error|ok|clear> [--pid N]|default-config|quit>");
     std::process::exit(2)
 }
 
@@ -42,6 +42,8 @@ fn input_cmd(args: &[String]) -> Option<oxide_ipc::InputCmd> {
         "dclick" => I::DoubleClick { x: f(1)?, y: f(2)? },
         "scroll" => I::Scroll { dx: f(1)?, dy: f(2)? },
         "key" => I::Key { name: args.get(1)?.clone(), mods: args[2..].to_vec() },
+        "keydown" => I::KeyState { name: args.get(1)?.clone(), pressed: true },
+        "keyup" => I::KeyState { name: args.get(1)?.clone(), pressed: false },
         "type" => I::Type { text: args[1..].join(" ") },
         _ => return None,
     })
@@ -148,6 +150,7 @@ fn main() {
         Some("files") => tools::files(),
         Some("ipc") if a.len() >= 3 => tools::ipc(&a[1..]),
         Some("doctor") => tools::doctor(),
+        Some("edit-config") => tools::edit_config(&a[1..]),
         // the complete default configuration (what a fresh install starts with), as TOML
         Some("default-config") => {
             print!("{}", oxide_config::Config::default().to_toml().unwrap_or_default());
@@ -208,6 +211,11 @@ fn main() {
                 }
             }
             Request::SetRule { app_id: app.to_string(), rule, clear }
+        }
+        // oxide-ctl signal busy|error|ok|clear [--pid N]: tell Oxide how a program in a window is doing
+        ["signal", st, rest @ ..] => {
+            let pid = rest.iter().position(|a| *a == "--pid").and_then(|i| rest.get(i + 1)).and_then(|p| p.parse().ok());
+            Request::Signal { pid, state: st.to_string() }
         }
         ["dispatch", j] => Request::Dispatch { action: serde_json::from_str(j).unwrap_or_else(|_| usage()) },
         _ => usage(),

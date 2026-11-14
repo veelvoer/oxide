@@ -143,3 +143,43 @@ pub fn doctor() -> ! {
     println!("\nMissing optional tools only switch off the feature named next to them.");
     std::process::exit(if missing_required { 1 } else { 0 })
 }
+
+/// `oxide-ctl edit-config [line]`: open oxide.toml in your editor ($VISUAL / $EDITOR; terminal editors in a terminal),
+/// at the line when given.
+pub fn edit_config(args: &[String]) -> ! {
+    let path = oxide_config::Config::path();
+    let file = path.display().to_string();
+    let line = args.first().and_then(|l| l.parse::<usize>().ok());
+    let editor = std::env::var("VISUAL").or_else(|_| std::env::var("EDITOR")).unwrap_or_default();
+    let ed = editor.split_whitespace().next().unwrap_or("").to_string();
+    let name = std::path::Path::new(&ed).file_name().and_then(|n| n.to_str()).unwrap_or("").to_string();
+    let gui = ["code", "codium", "code-oss", "zed", "subl", "gedit", "gnome-text-editor", "kate", "kwrite", "mousepad", "pluma", "xed"];
+    if !ed.is_empty() && which(&ed).is_some() {
+        if gui.contains(&name.as_str()) {
+            let mut c = Command::new(&ed);
+            match (name.as_str(), line) {
+                ("code" | "codium" | "code-oss", Some(l)) => { c.args(["--goto", &format!("{file}:{l}")]); }
+                ("zed" | "subl", Some(l)) => { c.arg(format!("{file}:{l}")); }
+                (_, Some(l)) if matches!(name.as_str(), "gedit" | "gnome-text-editor" | "kate" | "kwrite" | "pluma" | "xed") => { c.arg(format!("+{l}")).arg(&file); }
+                _ => { c.arg(&file); }
+            }
+            let ok = c.stdin(Stdio::null()).spawn().is_ok();
+            std::process::exit(if ok { 0 } else { 1 })
+        }
+        // vim, nano, helix, micro, kakoune, emacs -nw ... all understand +LINE
+        let mut cmd = vec![ed.clone()];
+        if let Some(l) = line { cmd.push(format!("+{l}")); }
+        cmd.push(file.clone());
+        terminal(&cmd);
+    }
+    // no editor set: the first terminal editor that exists, else the desktop's text editor
+    for e in ["nvim", "vim", "hx", "micro", "nano"] {
+        if which(e).is_some() {
+            let mut cmd = vec![e.to_string()];
+            if let Some(l) = line { cmd.push(format!("+{l}")); }
+            cmd.push(file.clone());
+            terminal(&cmd);
+        }
+    }
+    std::process::exit(if spawn("xdg-open", &[&file]) { 0 } else { 1 })
+}

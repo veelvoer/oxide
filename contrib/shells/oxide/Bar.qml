@@ -16,6 +16,7 @@ PanelWindow {
     implicitHeight: BarConfig.height + BarConfig.inset * 2
     color: "transparent"
     WlrLayershell.namespace: "oxide-bar"
+    visible: !BarConfig.hidden
 
     // one background for flat and island styles
     Rectangle {

@@ -19,7 +19,11 @@ Singleton {
     property int margin: 6
     property int radius: -1          // -1 follows the theme's roundness
     property int spacing: 6
-    property string lanes: "plain"   // "plain" or "pill": give each group its own rounded background
+    property string lanes: "plain"
+    // zero bar: no permanent bar, hold Super for the ambient HUD instead
+    property bool hidden: false
+    // hold Super to see the HUD (time, workspaces, status and key hints)
+    property bool hud: true   // "plain" or "pill": give each group its own rounded background
     readonly property real cornerRadius: radius >= 0 ? radius : Theme.rBox
     property real opacity: 0.96
     property var left: [{ "id": "launcher" }, { "id": "workspaces" }, { "id": "window" }]
@@ -28,14 +32,14 @@ Singleton {
 
     // space the bar takes at the screen edge, popups sit just beyond it
     readonly property real inset: style === "flat" ? 0 : margin
-    readonly property real barSpace: height + inset * 2
+    readonly property real barSpace: hidden ? 0 : height + inset * 2
 
     function apply(c) {
         // keys that are absent go back to their defaults, so removing one in the editor takes effect
         root.radius = -1;
         const set = (k, v) => { if (v !== undefined && v !== null) root[k] = v; };
         set("position", c.position); set("style", c.style); set("height", c.height); set("margin", c.margin);
-        set("radius", c.radius); set("spacing", c.spacing); set("lanes", c.lanes); set("opacity", c.opacity); set("left", c.left); set("center", c.center); set("right", c.right);
+        set("radius", c.radius); set("spacing", c.spacing); set("lanes", c.lanes); set("opacity", c.opacity); root.hidden = !!c.hidden; root.hud = c.hud !== false; set("left", c.left); set("center", c.center); set("right", c.right);
     }
 
     FileView {

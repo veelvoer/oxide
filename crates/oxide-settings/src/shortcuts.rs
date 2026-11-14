@@ -45,6 +45,8 @@ const KINDS: &[Kind] = &[
     Kind { label: "Send window to next / previous workspace", group: "Workspaces", make: || Action::MoveToWorkspaceRel(1) },
     Kind { label: "Show / hide scratchpad", group: "Workspaces", make: || Action::ToggleSpecial },
     Kind { label: "Send window to scratchpad", group: "Workspaces", make: || Action::MoveToSpecial },
+    Kind { label: "Show / hide a group of apps", group: "Workspaces", make: || Action::ToggleScratchpad(String::new()) },
+    Kind { label: "Overview of all workspaces", group: "Workspaces", make: || Action::ToggleOverview },
     Kind { label: "Focus another screen", group: "Screens", make: || Action::FocusMonitor(Dir::Right) },
     Kind { label: "Send window to another screen", group: "Screens", make: || Action::MoveToMonitor(Dir::Right) },
     Kind { label: "Switch tiling layout", group: "Layout", make: || Action::CycleLayout },
@@ -111,6 +113,8 @@ fn action_icon(a: &Action) -> &'static str {
         Action::MoveDir(_) => "arrow-expand-horizontal",
         Action::Workspace(_) | Action::MoveToWorkspace(_) | Action::WorkspaceRel(_) | Action::WorkspaceExisting(_) | Action::MoveToWorkspaceRel(_) => "view-grid-outline",
         Action::ToggleSpecial | Action::MoveToSpecial => "leaf",
+        Action::ToggleScratchpad(_) => "layers-triple-outline",
+        Action::ToggleOverview => "view-grid-outline",
         Action::FocusMonitor(_) | Action::MoveToMonitor(_) => "monitor-multiple",
         Action::CycleLayout | Action::GrowMaster | Action::ShrinkMaster => "view-dashboard-outline",
         Action::ReloadConfig => "refresh",
@@ -142,6 +146,9 @@ fn describe(a: &Action) -> String {
         }
         Action::ToggleSpecial => "Show or hide the scratchpad".into(),
         Action::MoveToSpecial => "Send window to the scratchpad".into(),
+        Action::ToggleScratchpad(n) if n.is_empty() => "Show or hide a group (not set)".into(),
+        Action::ToggleScratchpad(n) => format!("Show or hide the {n} group"),
+        Action::ToggleOverview => "Overview of all workspaces".into(),
         Action::FocusMonitor(d) => format!("Focus the screen to the {}", dir_name(*d)),
         Action::MoveToMonitor(d) => format!("Send window to the screen to the {}", dir_name(*d)),
         Action::CycleLayout => "Switch tiling layout".into(),
@@ -311,6 +318,9 @@ fn action_editor(ui: &mut Ui, id: usize, a: &mut Action) {
     match a {
         Action::Exec(c) => {
             ui.add(egui::TextEdit::singleline(c).desired_width(320.0).hint_text("e.g. firefox"));
+        }
+        Action::ToggleScratchpad(n) => {
+            ui.add(egui::TextEdit::singleline(n).desired_width(200.0).hint_text("group name (Settings > Apps)"));
         }
         Action::FocusDir(d) | Action::MoveDir(d) | Action::FocusMonitor(d) | Action::MoveToMonitor(d) => dir_combo(ui, ("dir", id), d),
         Action::Workspace(n) | Action::MoveToWorkspace(n) => {

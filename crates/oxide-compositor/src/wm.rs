@@ -81,7 +81,7 @@ pub fn surface_of(w: &Window) -> Option<WlSurface> {
 }
 
 /// (app id / class, title) for wayland and X11 windows alike.
-fn window_info(w: &Window) -> (String, String) {
+pub(crate) fn window_info(w: &Window) -> (String, String) {
     if let Some(x) = w.x11_surface() {
         return (x.class(), x.title());
     }
@@ -114,7 +114,7 @@ impl Oxide {
     }
 
     fn shown_on(&self, ws: u32) -> Option<usize> {
-        self.monitors.iter().position(|m| m.ws == ws)
+        self.monitors.iter().position(|m| m.ws == ws || m.overlay == Some(ws))
     }
 
     pub fn layout_of(&self, ws: u32) -> LayoutKind {
@@ -171,6 +171,11 @@ impl Oxide {
                 blur = rule.blur;
             }
         }
+        // started by a macro scratchpad: it joins its group
+        if let Some(g) = self.pending_group_for(&app_id) {
+            ws = g;
+            floating = false;
+        }
         info!(app_id, title, ws, floating, "mapping window");
         self.wins.push(Win {
             window: window.clone(),
@@ -192,6 +197,7 @@ impl Oxide {
             tiled: false,
             visible: false,
             opacity,
+            signal: None,
             blur,
             blur_id: smithay::backend::renderer::element::Id::new(),
             borders: std::array::from_fn(|_| SolidColorBuffer::default()),
@@ -340,6 +346,7 @@ impl Oxide {
         let bs = g.border_size.max(0);
 
         let mut visible = vec![false; self.wins.len()];
+        let mut overlay_wins: Vec<Window> = vec![];
         for mi in 0..self.monitors.len() {
             let out = self.monitors[mi].output.clone();
             let ws = self.monitors[mi].ws;
@@ -359,12 +366,16 @@ impl Oxide {
             let tiled = pick(&|fl, fs| !fl && !fs);
             let floating = pick(&|fl, fs| fl && !fs);
             let full = pick(&|_, fs| fs);
-            let rects = compute(
+            // a window that needs you (failed build, call) gets the bigger share
+            let hot = self.hot_window(&tiled);
+            let rects = oxide_layout::compute_weighted(
                 self.layout_of(ws),
                 area,
                 tiled.len(),
                 self.config.layout.split_ratio,
                 self.config.layout.master_factor,
+                hot,
+                self.config.layout.focus_weight,
             );
             let rects = apply_gaps(&rects, area, g.gaps_in, g.gaps_out);
             for (&i, r) in tiled.iter().zip(rects) {
@@ -391,6 +402,29 @@ impl Oxide {
                 self.wins[i].visible = true;
                 self.place(i, ogeo, 0, false);
             }
+            // a macro scratchpad over this workspace: its windows side by side in a centered block
+            if let Some(gws) = self.monitors[mi].overlay {
+                let members: Vec<usize> = (0..self.wins.len()).filter(|&i| self.wins[i].ws == gws).collect();
+                if !members.is_empty() {
+                    let (fw, fh) = self
+                        .config
+                        .scratchpads
+                        .get((gws - oxide_config::GROUP_WS) as usize)
+                        .map_or((0.84, 0.72), |s| (s.width.clamp(0.2, 1.0), s.height.clamp(0.2, 1.0)));
+                    let (w, h) = ((area.w as f32 * fw) as i32, (area.h as f32 * fh) as i32);
+                    let (x0, y0) = (area.x + (area.w - w) / 2, area.y + (area.h - h) / 2);
+                    let n = members.len() as i32;
+                    let gap = g.gaps_in.max(6);
+                    let cw = (w - gap * (n - 1)) / n;
+                    for (k, &i) in members.iter().enumerate() {
+                        visible[i] = true;
+                        self.wins[i].visible = true;
+                        let r = Rectangle::new((x0 + k as i32 * (cw + gap), y0).into(), (cw, h).into());
+                        self.place(i, r, bs, false);
+                        overlay_wins.push(self.wins[i].window.clone());
+                    }
+                }
+            }
         }
         for (i, vis) in visible.iter().enumerate() {
             self.wins[i].visible = *vis;
@@ -406,6 +440,10 @@ impl Oxide {
             .map(|w| w.window.clone())
             .collect();
         for w in order {
+            self.space.raise_element(&w, false);
+        }
+        // scratchpads float above everything on their monitor
+        for w in overlay_wins {
             self.space.raise_element(&w, false);
         }
         self.update_borders();
@@ -673,7 +711,7 @@ impl Oxide {
             .iter()
             .map(|w| w.ws)
             .chain(self.monitors.iter().map(|m| m.ws))
-            .filter(|&id| id != SPECIAL_WS)
+            .filter(|&id| id < SPECIAL_WS)
             .collect();
         ids.sort_unstable();
         ids.dedup();
@@ -844,11 +882,12 @@ impl Oxide {
                 l.split_ratio = (l.split_ratio + d).clamp(0.1, 0.9);
                 self.arrange();
             }
-            Action::ReloadConfig => match oxide_config::Config::load() {
-                Ok(c) => self.apply_config(c),
-                Err(e) => tracing::warn!("config reload failed: {e}"),
-            },
+            Action::ReloadConfig => {
+                let _ = self.reload_config_from_disk();
+            }
             Action::SendKey(combo) => self.send_key(combo),
+            Action::ToggleScratchpad(name) => self.toggle_scratchpad(name),
+            Action::ToggleOverview => self.toggle_overview(),
             Action::Quit => self.loop_signal.stop(),
         }
     }
@@ -867,6 +906,8 @@ impl Oxide {
             .iter()
             .map(|w| w.ws)
             .chain(self.monitors.iter().map(|m| m.ws))
+            // the workspaces of macro scratchpads are not workspaces you visit
+            .filter(|&id| id < oxide_config::GROUP_WS)
             .collect();
         ids.sort_unstable();
         ids.dedup();
@@ -901,6 +942,7 @@ impl Oxide {
                         floating: w.floating,
                         focused: focus == Some(&w.window),
                         fullscreen: w.fullscreen,
+                        signal: w.signal.map(|s| s.0.name().to_string()).unwrap_or_default(),
                         rule,
                         geometry: {
                             let r = w.cur.rounded();
@@ -929,6 +971,8 @@ impl Oxide {
                     })
                 })
                 .collect(),
+            config_error: self.config_error.clone(),
+            super_held: self.super_held,
         }
     }
 }

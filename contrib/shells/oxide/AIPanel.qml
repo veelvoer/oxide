@@ -2,11 +2,10 @@
 import Quickshell
 import QtQuick
 
-Pop {
+Dock {
     id: root
     required property var ai
-    place: "right"
-    modal: false          // stays open while you work in other windows; close it with the X or Super+A
+    // a sidebar: windows make room for it; close it with the X, Esc or Super+A
     contentWidth: 440
     wantsKeyboard: true
 

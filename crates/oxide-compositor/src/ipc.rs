@@ -120,12 +120,13 @@ impl Oxide {
                     Err(e) => Response::Error { message: e.to_string() },
                 }
             }
-            Request::Reload => match oxide_config::Config::load() {
-                Ok(c) => {
-                    self.apply_config(c);
-                    Response::Ok
-                }
-                Err(e) => Response::Error { message: e.to_string() },
+            Request::Signal { pid, state } => match self.signal_from(pid, &state) {
+                Ok(()) => Response::Ok,
+                Err(message) => Response::Error { message },
+            },
+            Request::Reload => match self.reload_config_from_disk() {
+                Ok(()) => Response::Ok,
+                Err(message) => Response::Error { message },
             },
             Request::Dispatch { action } => {
                 self.dispatch_action(&action);

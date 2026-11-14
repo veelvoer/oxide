@@ -46,6 +46,11 @@ uniform vec4 c1;
 uniform vec4 c2;
 uniform vec4 c3;
 uniform vec4 inactive;
+uniform float mode;
+uniform float phase;
+uniform vec4 gcol;
+uniform float heat;
+uniform vec4 hcol;
 {SD}
 vec4 gradient(float t) {{
     if (ncols < 1.5) return c0;
@@ -66,6 +71,16 @@ void main() {{
     float ext = max(abs(size.x * dir.x) + abs(size.y * dir.y), 1.0);
     float t = clamp(dot(p, dir) / ext + 0.5, 0.0, 1.0);
     vec4 col = mix(inactive, gradient(t), mixv);
+    // telemetry: the focused border warms up while the CPU is busy
+    col = mix(col, hcol, heat * mixv);
+    if (mode > 0.5) {{
+        float k = 0.0;
+        if (mode < 1.5) {{ k = 0.55 + 0.45 * sin(phase * 5.0); }}
+        else if (mode < 2.5) {{ float q = fract(phase * 0.6); float d = abs(t - q); d = min(d, 1.0 - d); k = smoothstep(0.2, 0.0, d); }}
+        else if (mode < 3.5) {{ k = 0.3 + 0.3 * sin(phase * 1.6); }}
+        else {{ k = clamp(1.0 - phase / 1.8, 0.0, 1.0); }}
+        col = mix(col, gcol, k);
+    }}
     gl_FragColor = col * (a * alpha);
 }}"
     )
@@ -237,7 +252,7 @@ impl Shaders {
         let border = r
             .compile_custom_pixel_shader(
                 border_src(),
-                &[f("radius"), f("border"), f("mixv"), f("angle"), f("ncols"), v4("c0"), v4("c1"), v4("c2"), v4("c3"), v4("inactive")],
+                &[f("radius"), f("border"), f("mixv"), f("angle"), f("ncols"), v4("c0"), v4("c1"), v4("c2"), v4("c3"), v4("inactive"), f("mode"), f("phase"), v4("gcol"), f("heat"), v4("hcol")],
             )
             .map_err(|e| warn!("border shader: {e}"))
             .ok()?;
