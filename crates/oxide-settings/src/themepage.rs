@@ -49,10 +49,12 @@ pub fn page(app: &mut App, ui: &mut Ui) {
         let w = ((ui.available_width() - 12.0 * 3.0) / 4.0).floor();
         egui::Grid::new("theme-presets").spacing(vec2(12.0, 12.0)).show(ui, |ui| {
             for (i, p) in presets.iter().enumerate() {
-                let sel = app.cfg.theme.preset == p.name;
+                // the first card is the wallpaper palette (its name is "oxide" until a wallpaper has been read)
+                let key: &str = if i == 0 { "auto" } else { &p.name };
+                let sel = app.cfg.theme.preset == key;
                 let (rect, resp) = ui.allocate_exact_size(vec2(w, 74.0), Sense::click());
                 let bg = parse_hex(&p.bg);
-                let resp = if p.name == "auto" { resp.on_hover_text("Colors taken from your wallpaper. They change when the wallpaper does.") } else { resp };
+                let resp = if i == 0 { resp.on_hover_text("Colors taken from your wallpaper. They change when the wallpaper does.") } else { resp };
                 ui.painter().rect(
                     rect,
                     radius(6),
@@ -60,7 +62,7 @@ pub fn page(app: &mut App, ui: &mut Ui) {
                     Stroke::new(if sel { 2.0 } else { 1.0 }, if sel { ACCENT() } else if resp.hovered() { MUTED() } else { BORDER() }),
                     egui::StrokeKind::Inside,
                 );
-                ui.painter().text(rect.left_top() + vec2(10.0, 10.0), Align2::LEFT_TOP, if p.name == "auto" { "From wallpaper".to_string() } else { title(&p.name) }, FontId::new(13.0, medium()), parse_hex(&p.text));
+                ui.painter().text(rect.left_top() + vec2(10.0, 10.0), Align2::LEFT_TOP, if i == 0 { "From wallpaper".to_string() } else { title(&p.name) }, FontId::new(13.0, medium()), parse_hex(&p.text));
                 if sel {
                     let c = rect.right_top() + vec2(-18.0, 18.0);
                     ui.painter().circle_filled(c, 9.0, ACCENT());
@@ -74,7 +76,7 @@ pub fn page(app: &mut App, ui: &mut Ui) {
                     ui.painter().rect(r, radius(3), parse_hex(c), Stroke::NONE, egui::StrokeKind::Inside);
                 }
                 if resp.clicked() {
-                    app.cfg.theme.preset = p.name.clone();
+                    app.cfg.theme.preset = key.to_string();
                     app.cfg.theme.accent = None;
                 }
                 if (i + 1) % 4 == 0 {
