@@ -4,17 +4,18 @@
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
     <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
     <application
         android:label="Oxide Remote"
         android:icon="@mipmap/ic_launcher"
         android:allowBackup="false"
-        android:hasCode="false"
+        android:hasCode="true"
         android:extractNativeLibs="false"
         android:usesCleartextTraffic="true"
         android:theme="@style/Theme.OxideRemote">
         <activity
-            android:name="android.app.NativeActivity"
+            android:name=".OxideActivity"
             android:exported="true"
             android:launchMode="singleTask"
             android:configChanges="orientation|keyboardHidden|keyboard|screenSize|smallestScreenSize|screenLayout|uiMode|density|fontScale|locale|layoutDirection|navigation"

@@ -127,6 +127,9 @@ impl CompositorHandler for Oxide {
             if let Some(window) = self.window_for_surface(&root) {
                 window.on_commit();
             }
+            if let Some(i) = self.wins.iter().position(|w| w.held.is_some() && w.window.toplevel().is_some_and(|t| t.wl_surface() == &root)) {
+                self.held_commit(i);
+            }
         }
         self.popups.commit(surface);
 

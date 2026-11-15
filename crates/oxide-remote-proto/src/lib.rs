@@ -92,6 +92,18 @@ pub enum ToPhone {
     Stats(Stats),
     Done { ok: bool, message: String },
     Clipboard { text: String },
+    /// Where the PC can be reached away from home (the phone keeps these for later).
+    Whereabouts(Whereabouts),
+}
+
+/// The PC's addresses on the internet and the ntfy server where it leaves an encrypted note when they change.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct Whereabouts {
+    /// "host:port" or "[v6]:port"
+    pub addrs: Vec<String>,
+    pub rendezvous: String,
+    pub at: u64,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
@@ -104,6 +116,9 @@ pub struct PcInfo {
     /// Oxide is running (input control, workspaces)
     pub oxide: bool,
     pub can_capture: bool,
+    /// the PC's Oxide colors (hex): background, card, text, muted, accent, text on accent
+    #[serde(default)]
+    pub palette: Vec<String>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
@@ -322,6 +337,52 @@ pub fn session(ltk: &[u8; 32], phone_nonce: &[u8], pc_nonce: &[u8]) -> (Cipher, 
     )
 }
 
+// ------------------------------------------------------------- notes on a rendezvous server
+//
+// When the PC's address changes it leaves a note for each paired phone on a public pub/sub server (ntfy). Only
+// that phone can find the topic (derived from the pairing key) and read the note (sealed with a key derived from it).
+
+fn note_key(ltk: &[u8; 32], what: &[u8]) -> [u8; 32] {
+    let hk = Hkdf::<Sha256>::new(Some(b"oxide-remote note"), ltk);
+    let mut k = [0u8; 32];
+    let _ = hk.expand(what, &mut k);
+    k
+}
+
+/// The topic name for one pairing.
+pub fn note_topic(ltk: &[u8; 32]) -> String {
+    format!("oxr{}", &hex(&note_key(ltk, b"topic"))[..40])
+}
+
+pub fn note_seal(ltk: &[u8; 32], plain: &[u8]) -> String {
+    let aead = ChaCha20Poly1305::new_from_slice(&note_key(ltk, b"seal")).expect("key");
+    let n = random::<12>();
+    let ct = aead.encrypt(Nonce::from_slice(&n), plain).unwrap_or_default();
+    hex(&[&n[..], &ct].concat())
+}
+
+pub fn note_open(ltk: &[u8; 32], note: &str) -> Option<Vec<u8>> {
+    let b = unhex(note.trim())?;
+    if b.len() < 13 {
+        return None;
+    }
+    let aead = ChaCha20Poly1305::new_from_slice(&note_key(ltk, b"seal")).ok()?;
+    aead.decrypt(Nonce::from_slice(&b[..12]), &b[12..]).ok()
+}
+
+/// Whether an address belongs to the local network (pairing is only allowed from there).
+pub fn is_local(ip: std::net::IpAddr) -> bool {
+    match ip {
+        std::net::IpAddr::V4(v) => v.is_private() || v.is_loopback() || v.is_link_local() || (v.octets()[0] == 100 && (v.octets()[1] & 0xc0) == 64),
+        std::net::IpAddr::V6(v) => {
+            if let Some(m) = v.to_ipv4_mapped() {
+                return is_local(std::net::IpAddr::V4(m));
+            }
+            v.is_loopback() || (v.segments()[0] & 0xfe00) == 0xfc00 || (v.segments()[0] & 0xffc0) == 0xfe80
+        }
+    }
+}
+
 /// A Wake-on-LAN magic packet for `mac` ("aa:bb:cc:dd:ee:ff").
 pub fn magic_packet(mac: &str) -> Option<Vec<u8>> {
     let bytes: Vec<u8> = mac.split([':', '-']).map(|p| u8::from_str_radix(p, 16).ok()).collect::<Option<Vec<u8>>>()?;
@@ -355,6 +416,15 @@ pub fn wake(mac: &str, subnet_broadcast: Option<std::net::Ipv4Addr>) -> std::io:
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn notes_roundtrip() {
+        let k = [7u8; 32];
+        let n = note_seal(&k, b"hello");
+        assert_eq!(note_open(&k, &n).as_deref(), Some(&b"hello"[..]));
+        assert!(note_open(&[8u8; 32], &n).is_none());
+        assert!(note_topic(&k).starts_with("oxr") && note_topic(&k).len() == 43);
+    }
 
     #[test]
     fn pairing_agrees_only_with_the_right_code() {

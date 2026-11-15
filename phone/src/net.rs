@@ -42,14 +42,87 @@ fn connect(host: &str, port: u16, timeout: Duration) -> std::io::Result<TcpStrea
         .to_socket_addrs()?
         .next()
         .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotFound, "unknown address"))?;
+    connect_addr(addr, timeout)
+}
+
+fn connect_addr(addr: SocketAddr, timeout: Duration) -> std::io::Result<TcpStream> {
     let s = TcpStream::connect_timeout(&addr, timeout)?;
     s.set_nodelay(true)?;
     Ok(s)
 }
 
-/// Whether the PC answers at all (for the green dot).
-pub fn reachable(pc: &Pc) -> bool {
-    connect(&pc.host, pc.port, Duration::from_millis(700)).is_ok()
+/// How the phone reaches a PC.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Route {
+    /// the same network
+    Home,
+    /// over the internet (or a VPN)
+    Away,
+}
+
+/// Try addresses at the same time; the first that answers wins.
+fn race(addrs: &[String], timeout: Duration) -> Option<TcpStream> {
+    let (tx, rx) = channel();
+    let mut n = 0;
+    for a in addrs {
+        let Some(addr) = a.to_socket_addrs().ok().and_then(|mut i| i.next()) else { continue };
+        let tx = tx.clone();
+        n += 1;
+        std::thread::spawn(move || {
+            let _ = tx.send(connect_addr(addr, timeout).ok());
+        });
+    }
+    drop(tx);
+    for _ in 0..n {
+        match rx.recv() {
+            Ok(Some(s)) => return Some(s),
+            Ok(None) => continue,
+            Err(_) => break,
+        }
+    }
+    None
+}
+
+/// The PC's latest note on its rendezvous server: where it is now.
+pub fn whereabouts(pc: &Pc) -> Option<Whereabouts> {
+    let ltk: [u8; 32] = unhex(&pc.ltk)?.try_into().ok()?;
+    let server = if pc.rendezvous.is_empty() { return None } else { pc.rendezvous.trim_end_matches('/') };
+    let body = crate::platform::http_get(&format!("{server}/{}/json?poll=1&since=48h", note_topic(&ltk)))?;
+    body.lines()
+        .filter_map(|l| serde_json::from_str::<serde_json::Value>(l).ok())
+        .filter(|v| v["event"] == "message")
+        .filter_map(|v| note_open(&ltk, v["message"].as_str()?))
+        .filter_map(|b| serde_json::from_slice::<Whereabouts>(&b).ok())
+        .max_by_key(|w| w.at)
+}
+
+/// Reach the PC: on the home network first, then at its addresses on the internet, then wherever its latest note
+/// says it is. Returns the new addresses when they came from a note (to remember them).
+pub fn connect_any(pc: &Pc) -> Result<(TcpStream, Route, Option<Whereabouts>), String> {
+    if let Ok(s) = connect(&pc.host, pc.port, Duration::from_millis(1200)) {
+        return Ok((s, Route::Home, None));
+    }
+    if let Some(s) = race(&pc.remote, Duration::from_secs(4)) {
+        return Ok((s, Route::Away, None));
+    }
+    if let Some(w) = whereabouts(pc).filter(|w| w.addrs != pc.remote) {
+        if let Some(s) = race(&w.addrs, Duration::from_secs(5)) {
+            return Ok((s, Route::Away, Some(w)));
+        }
+    }
+    Err(if pc.remote.is_empty() {
+        format!("{} is not on this network. To reach it from anywhere, turn on \"Reach this PC from anywhere\" in its Settings > Phone and connect once at home.", pc.name)
+    } else {
+        format!("Cannot reach {}. Is it on?", pc.name)
+    })
+}
+
+/// Whether the PC answers, and how (for the status on the list).
+pub fn reachable(pc: &Pc) -> Option<Route> {
+    if connect(&pc.host, pc.port, Duration::from_millis(700)).is_ok() {
+        return Some(Route::Home);
+    }
+    race(&pc.remote, Duration::from_millis(2500)).map(|_| Route::Away)
 }
 
 // ------------------------------------------------------------- pairing
@@ -81,7 +154,7 @@ pub fn pair(host: String, port: u16, phone_id: String, phone_name: String) -> (R
             let (confirm, ltk) = pair_keys(&shared, code.trim(), &key.public, &pc_epk);
             write_hello(&mut c, &Hello::PairProof { mac: proof(&confirm, "phone") }).map_err(|e| e.to_string())?;
             match read_hello(&mut c).map_err(|e| e.to_string())? {
-                Hello::PairOk { mac } if check_proof(&confirm, "pc", &mac) => Ok(Pc { id: pc_id, name: pc_name, host, port, macs, ltk: hex(&ltk) }),
+                Hello::PairOk { mac } if check_proof(&confirm, "pc", &mac) => Ok(Pc { id: pc_id, name: pc_name, host, port, macs, ltk: hex(&ltk), ..Default::default() }),
                 Hello::PairOk { .. } => Err("The PC could not prove it knows the code.".into()),
                 Hello::Refused { reason } => Err(reason),
                 _ => Err("unexpected answer".into()),
@@ -95,7 +168,9 @@ pub fn pair(host: String, port: u16, phone_id: String, phone_name: String) -> (R
 // ------------------------------------------------------------- session
 
 pub enum Event {
-    Connected { pc_name: String },
+    Connected { pc_name: String, route: Route },
+    /// the PC's addresses changed (learned from its note): remember them
+    Moved(Whereabouts),
     Msg(ToPhone),
     /// a decoded screen frame (RGBA) with the PC screen's full size
     Frame { seq: u64, rgba: Vec<u8>, w: usize, h: usize, full: (u32, u32), bytes: usize },
@@ -116,7 +191,10 @@ pub fn open(pc: &Pc, phone_id: &str, wake: impl Fn() + Send + Sync + 'static) ->
     let wake = std::sync::Arc::new(wake);
     std::thread::spawn(move || {
         let r = (|| -> Result<(), String> {
-            let mut c = connect(&pc.host, pc.port, Duration::from_secs(4)).map_err(|e| format!("Cannot reach {}: {e}", pc.name))?;
+            let (mut c, route, moved) = connect_any(&pc)?;
+            if let Some(w) = moved {
+                let _ = ev_tx.send(Event::Moved(w));
+            }
             let ltk: [u8; 32] = unhex(&pc.ltk).and_then(|v| v.try_into().ok()).ok_or("broken pairing; pair again")?;
             let nonce = random::<16>();
             write_hello(&mut c, &Hello::Hello { phone_id, nonce: hex(&nonce) }).map_err(|e| e.to_string())?;
@@ -126,7 +204,7 @@ pub fn open(pc: &Pc, phone_id: &str, wake: impl Fn() + Send + Sync + 'static) ->
                 _ => return Err("unexpected answer".into()),
             };
             let (mut seal, mut open) = session(&ltk, &nonce, &pc_nonce);
-            let _ = ev_tx.send(Event::Connected { pc_name });
+            let _ = ev_tx.send(Event::Connected { pc_name, route });
             wake();
             // writer: everything the UI sends
             let mut w = c.try_clone().map_err(|e| e.to_string())?;
@@ -168,6 +246,26 @@ pub fn open(pc: &Pc, phone_id: &str, wake: impl Fn() + Send + Sync + 'static) ->
         wake();
     });
     Session { to_pc, events }
+}
+
+/// Send a few messages in a short session (for example: ask one PC to wake another).
+pub fn one_shot(pc: &Pc, phone_id: &str, msgs: Vec<ToPc>) -> Result<(), String> {
+    let (mut c, _, _) = connect_any(pc)?;
+    let ltk: [u8; 32] = unhex(&pc.ltk).and_then(|v| v.try_into().ok()).ok_or("broken pairing")?;
+    let nonce = random::<16>();
+    write_hello(&mut c, &Hello::Hello { phone_id: phone_id.to_string(), nonce: hex(&nonce) }).map_err(|e| e.to_string())?;
+    let pc_nonce = match read_hello(&mut c).map_err(|e| e.to_string())? {
+        Hello::HelloOk { nonce, .. } => unhex(&nonce).ok_or("bad nonce")?,
+        Hello::Refused { reason } => return Err(reason),
+        _ => return Err("unexpected answer".into()),
+    };
+    let (mut seal, _) = session(&ltk, &nonce, &pc_nonce);
+    for m in msgs {
+        write_frame(&mut c, &seal.seal(&json_body(&m))).map_err(|e| e.to_string())?;
+    }
+    // give the PC a moment to act before the connection closes
+    std::thread::sleep(Duration::from_millis(300));
+    Ok(())
 }
 
 /// Read and drop everything (used to make sure a stream is drained) — kept small on purpose.

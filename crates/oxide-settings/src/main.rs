@@ -84,7 +84,7 @@ impl Page {
         nav(Page::Terminal, "Terminal", "console-line", "Desktop", "kitty fish font size opacity padding cursor shell prompt", false),
         nav(Page::Apps, "Apps", "console-line", "Oxide", "startup autostart rules environment variables xwayland", true),
         nav(Page::Own, "Own configs", "text-box-edit-outline", "Oxide", "own custom kitty fish gtk shell editor syntax file upload import", true),
-        nav(Page::Config, "Config", "cog-outline", "Oxide", "import export reset file hyprland backup", false),
+        nav(Page::Config, "Config", "cog-outline", "Oxide", "import export reset file hyprland backup update version", false),
     ];
 }
 

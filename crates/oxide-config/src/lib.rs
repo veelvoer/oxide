@@ -40,6 +40,8 @@ pub struct Config {
     pub scratchpads: Vec<Scratchpad>,
     /// The phone app (Oxide Remote): run oxide-remoted so paired phones can connect.
     pub remote: RemoteCfg,
+    /// Updates from the git repository (oxide-ctl update).
+    pub update: UpdateCfg,
     pub exec_once: Vec<String>,
     pub env: Vec<(String, String)>,
 }
@@ -387,10 +389,36 @@ pub enum Dir {
     Down,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(default)]
 pub struct RemoteCfg {
     pub enabled: bool,
+    /// Also reachable away from home: the router is asked to forward the port (UPnP) and paired phones learn
+    /// the PC's address through an encrypted note on `rendezvous`.
+    pub anywhere: bool,
+    /// A ntfy server (https://ntfy.sh or your own) used to tell phones where the PC is; only encrypted data goes there.
+    pub rendezvous: String,
+}
+
+impl Default for RemoteCfg {
+    fn default() -> Self {
+        Self { enabled: false, anywhere: false, rendezvous: "https://ntfy.sh".into() }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct UpdateCfg {
+    /// Look for a new version now and then, build and install it; what changed is shown at the next login.
+    pub auto: bool,
+    pub repo: String,
+    pub branch: String,
+}
+
+impl Default for UpdateCfg {
+    fn default() -> Self {
+        Self { auto: true, repo: "https://github.com/veelvoer/oxide".into(), branch: "main".into() }
+    }
 }
 
 /// A group of windows that appears and disappears as one, arranged side by side over the current workspace.
@@ -645,6 +673,7 @@ impl Default for Config {
                 .collect(),
             scratchpads: vec![],
             remote: RemoteCfg::default(),
+            update: UpdateCfg::default(),
             exec_once: vec![],
             shell: ShellCfg::default(),
             theme: theme::ThemeCfg::default(),

@@ -109,7 +109,13 @@ Groups of apps summoned and dismissed together with one key (`toggle_scratchpad`
 
 ## `[remote]`
 
-`enabled` (false): run `oxide-remoted` so paired phones can see and control this PC; see [PHONE.md](PHONE.md).
+`enabled` (false): run `oxide-remoted` so paired phones can see and control this PC; `anywhere` (false): also over
+the internet (UPnP port forwarding, encrypted notes on `rendezvous`, default `https://ntfy.sh`); see [PHONE.md](PHONE.md).
+
+## `[update]`
+
+`auto` (true): look for a new version every few hours, build and install it at the lowest priority, show what
+changed at the next login; `repo` (`https://github.com/veelvoer/oxide`), `branch` (`main`). See [UPDATES.md](UPDATES.md).
 
 ## `exec_once` and `env`
 

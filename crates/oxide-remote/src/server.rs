@@ -26,6 +26,9 @@ pub struct Shared {
     pub store: Arc<Mutex<Store>>,
     pub pairing: Arc<Mutex<Pairing>>,
     pub sampler: Sampler,
+    pub reach: Arc<Mutex<crate::reach::Reach>>,
+    /// connections from outside the local network that are still in the handshake
+    pub remote_handshakes: Arc<std::sync::atomic::AtomicUsize>,
 }
 
 pub fn discovery(shared: Shared) {
@@ -69,11 +72,31 @@ fn refuse(c: &mut TcpStream, reason: &str) -> std::io::Result<()> {
 }
 
 fn handle(mut c: TcpStream, sh: Shared) -> std::io::Result<()> {
-    c.set_read_timeout(Some(Duration::from_secs(120)))?;
-    match read_hello(&mut c)? {
-        Hello::PairHello { phone_id, phone_name, epk } => pair(c, sh, phone_id, phone_name, epk),
+    let local = c.peer_addr().map(|a| is_local(a.ip())).unwrap_or(false);
+    if local {
+        c.set_read_timeout(Some(Duration::from_secs(120)))?;
+        return match read_hello(&mut c)? {
+            Hello::PairHello { phone_id, phone_name, epk } => pair(c, sh, phone_id, phone_name, epk),
+            Hello::Hello { phone_id, nonce } => session(c, sh, phone_id, nonce),
+            _ => refuse(&mut c, "unexpected message"),
+        };
+    }
+    // from the internet: only paired phones, a short handshake, a few at a time, never pairing
+    if !sh.reach.lock().map(|r| r.on).unwrap_or(false) {
+        return Ok(());
+    }
+    use std::sync::atomic::Ordering::SeqCst;
+    if sh.remote_handshakes.fetch_add(1, SeqCst) >= 6 {
+        sh.remote_handshakes.fetch_sub(1, SeqCst);
+        return Ok(());
+    }
+    c.set_read_timeout(Some(Duration::from_secs(8)))?;
+    let hello = read_hello(&mut c);
+    sh.remote_handshakes.fetch_sub(1, SeqCst);
+    match hello? {
         Hello::Hello { phone_id, nonce } => session(c, sh, phone_id, nonce),
-        _ => refuse(&mut c, "unexpected message"),
+        Hello::PairHello { .. } => refuse(&mut c, "Pairing works only on the same network as the PC."),
+        _ => Ok(()),
     }
 }
 
@@ -140,6 +163,12 @@ fn session(mut c: TcpStream, sh: Shared, phone_id: String, nonce: String) -> std
     }
     c.set_read_timeout(Some(Duration::from_secs(60)))?;
     let sender = Arc::new(Mutex::new(Sender { stream: c.try_clone()?, cipher: to_phone }));
+    // where to find this PC away from home, for next time
+    let r = sh.reach.lock().map(|r| r.clone()).unwrap_or_default();
+    if r.on && !r.addrs.is_empty() {
+        let w = Whereabouts { addrs: r.addrs, rendezvous: r.rendezvous, at: store::now() };
+        let _ = sender.lock().unwrap().json(&ToPhone::Whereabouts(w));
+    }
     let streaming = Arc::new(AtomicBool::new(false));
     let acked = Arc::new(AtomicU64::new(0));
     let mut screen_output: Option<String> = None;
@@ -177,6 +206,10 @@ fn session(mut c: TcpStream, sh: Shared, phone_id: String, nonce: String) -> std
                         can_capture: !outputs.is_empty(),
                         outputs,
                         oxide,
+                        palette: {
+                            let p = oxide_config::theme::palette(&oxide_config::Config::load().unwrap_or_default().theme);
+                            vec![p.bg, p.surface, p.text, p.muted, p.accent, p.ink]
+                        },
                     }))?
                 }
                 ToPc::Stats => {

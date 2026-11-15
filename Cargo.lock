@@ -2311,6 +2311,7 @@ dependencies = [
  "rustix 1.1.6",
  "serde",
  "serde_json",
+ "ureq",
  "wayland-client",
  "wayland-protocols-wlr",
 ]

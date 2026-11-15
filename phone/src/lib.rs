@@ -1,8 +1,10 @@
 //! Oxide Remote for Android (and a desktop build for testing).
 pub mod app;
 pub mod net;
+pub mod platform;
 pub mod store;
 pub mod theme;
+pub mod ui;
 
 #[cfg(target_os = "android")]
 mod android {
@@ -20,15 +22,12 @@ mod android {
     fn android_main(app: android_activity::AndroidApp) {
         android_logger::init_once(android_logger::Config::default().with_max_level(log::LevelFilter::Info).with_tag("oxide-remote"));
         let dir = app.internal_data_path().unwrap_or_else(|| std::path::PathBuf::from("/data/local/tmp"));
+        crate::platform::init(&app);
         let options = eframe::NativeOptions { android_app: Some(app), ..Default::default() };
         let r = eframe::run_native(
             "Oxide Remote",
             options,
-            Box::new(move |cc| {
-                // phones are dense: scale egui points to roughly Android dp
-                let ppp = cc.egui_ctx.pixels_per_point().max(2.0);
-                Ok(Box::new(Root(crate::app::App::new(&cc.egui_ctx, dir, ppp))))
-            }),
+            Box::new(move |cc| Ok(Box::new(Root(crate::app::App::new(&cc.egui_ctx, dir))))),
         );
         if let Err(e) = r {
             log::error!("exit: {e}");

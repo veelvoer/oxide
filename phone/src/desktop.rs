@@ -17,5 +17,5 @@ fn main() -> eframe::Result {
         viewport: egui::ViewportBuilder::default().with_inner_size([412.0, 900.0]).with_app_id("oxide-remote"),
         ..Default::default()
     };
-    eframe::run_native("Oxide Remote", options, Box::new(move |cc| Ok(Box::new(Root(oxide_remote::app::App::new(&cc.egui_ctx, dir, 1.0))))))
+    eframe::run_native("Oxide Remote", options, Box::new(move |cc| Ok(Box::new(Root(oxide_remote::app::App::new(&cc.egui_ctx, dir))))))
 }

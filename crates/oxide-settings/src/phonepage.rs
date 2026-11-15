@@ -22,7 +22,7 @@ fn remoted(args: &[&str]) -> Option<serde_json::Value> {
 }
 
 pub fn page(app: &mut App, ui: &mut Ui) {
-    page_header(ui, "cellphone", "Phone", "See and control this PC from your phone, wake it up from anywhere in the house.");
+    page_header(ui, "cellphone", "Phone", "See and control this PC from your phone, at home or away.");
     let st = &mut app.phone;
     // refresh the status every few seconds while the page is open
     if app.cfg.remote.enabled && st.last.is_none_or(|l| l.elapsed() > Duration::from_secs(3)) {
@@ -61,6 +61,42 @@ pub fn page(app: &mut App, ui: &mut Ui) {
         let macs: Vec<String> = st.status.as_ref().and_then(|s| s["macs"].as_array().cloned()).unwrap_or_default().iter().filter_map(|m| m.as_str().map(String::from)).collect();
         let sub = if macs.is_empty() { "No wired or Wi-Fi card found.".to_string() } else { format!("{}  ·  must also be on in the BIOS", macs.join("  ")) };
         row_full(ui, None, "Wake-on-LAN", &sub, "", true, |_| {});
+    });
+
+    card(ui, "Away from home", |ui| {
+        let r = &app.cfg.remote;
+        let mut on = r.anywhere;
+        row_sub(
+            ui,
+            "web",
+            "Reach this PC from anywhere",
+            "Your router forwards one port to this PC (UPnP); paired phones find it through an encrypted note.",
+            !on,
+            |ui| {
+                switch(ui, &mut on);
+            },
+        );
+        if on != r.anywhere {
+            app.cfg.remote.anywhere = on;
+            st.last = None;
+        }
+        if on {
+            let reach = st.status.as_ref().map(|s| s["reach"].clone()).unwrap_or_default();
+            let (icon, text, color) = if let (Some(ip), Some(port)) = (reach["public_ip"].as_str(), reach["upnp_port"].as_u64()) {
+                ("check", format!("Reachable at {ip}:{port}. Open the PC once on the same network, so the phone learns the way."), GOOD())
+            } else if let Some(p) = reach["problem"].as_str() {
+                let others = reach["addrs"].as_array().map_or(0, |a| a.len());
+                let extra = if others > 0 { format!(" Still tried: {others} IPv6/VPN address(es).") } else { String::new() };
+                ("alert-circle-outline", format!("{p}{extra}"), WARN())
+            } else if reach["on"].as_bool() == Some(true) {
+                ("information-outline", "Asking the router…".to_string(), MUTED())
+            } else {
+                ("information-outline", "Starting…".to_string(), MUTED())
+            };
+            row_full(ui, Some(icon), "Status", &text, "", true, |ui| {
+                dot(ui, color);
+            });
+        }
     });
 
     card(ui, "Pairing", |ui| {

@@ -18,11 +18,11 @@ extra pages.
 | **Launcher** | calculator, history, web search engine, results shown (hidden with your own shell) |
 | **Assistant** | name, API key, model, permissions |
 | **Layout** | dwindle or master, windows with errors or calls grow on their own, focus follows mouse, scroll to switch workspaces |
-| **Phone** | let phones connect, this PC's name, Wake-on-LAN addresses, pair a phone (6-digit code), forget phones |
+| **Phone** | let phones connect, this PC's name, Wake-on-LAN addresses, reach this PC from anywhere (with its status), pair a phone (6-digit code), forget phones |
 | **Input** | keyboard layout and repeat, touchpad, mouse |
 | **Shortcuts** | search, click one to rebind (press the keys), add, duplicate, delete |
 | **Terminal** | the standard kitty: font, size, opacity, padding, cursor, history |
-| **Config** | where the file is, reload, import from Hyprland, reset everything |
+| **Config** | updates (version, check now, update automatically), where the file is, reload, import from Hyprland, reset everything |
 | *Shells* (Advanced) | install, import, switch and remove shells ([SHELLS.md](SHELLS.md)) |
 | *Apps* (Advanced) | commands to start with Oxide, window rules, environment variables |
 | *Own configs* (Advanced) | use your own shell/kitty/fish/GTK files; edit any of them in the built-in editor with syntax colors; import files |

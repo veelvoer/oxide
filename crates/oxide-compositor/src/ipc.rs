@@ -124,6 +124,10 @@ impl Oxide {
                 Ok(()) => Response::Ok,
                 Err(message) => Response::Error { message },
             },
+            Request::WhatsNewSeen => {
+                self.whats_new_seen();
+                Response::Ok
+            }
             Request::Reload => match self.reload_config_from_disk() {
                 Ok(()) => Response::Ok,
                 Err(message) => Response::Error { message },

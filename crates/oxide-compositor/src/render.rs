@@ -270,7 +270,9 @@ impl Oxide {
             }
         }
         for w in self.space.elements_for_output(output) {
-            if let Some(i) = self.win_idx(w) {
+            // a window that has not drawn at its size yet is mapped (it needs its output and frame callbacks to
+            // draw at all) but not shown
+            if let Some(i) = self.win_idx(w).filter(|&i| self.wins[i].held.is_none()) {
                 list.push((i, new_off));
             }
         }

@@ -7,6 +7,11 @@ cd "$(dirname "$0")/.."
 cargo build --release
 T="${CARGO_TARGET_DIR:-target}/release"
 mkdir -p "$HOME/.local/share/oxide/wallpapers" "$HOME/.local/bin" "$HOME/.local/share/oxide/shells" "$HOME/.config/oxide/shells"
+# which commit this is, for `oxide-ctl update` ("-dirty": local changes, never replaced by an update)
+if V=$(git rev-parse HEAD 2>/dev/null); then
+  git diff --quiet HEAD -- 2>/dev/null || V="$V-dirty"
+  echo "$V" > "$HOME/.local/share/oxide/version"
+fi
 install -m755 "$T/oxide" "$T/oxide-ctl" "$T/oxide-settings" "$T/oxide-ai" "$T/oxide-remoted" contrib/oxide-session "$HOME/.local/bin/"
 rm -rf "$HOME/.local/share/oxide/shells/oxide"
 cp -r contrib/shells/oxide "$HOME/.local/share/oxide/shells/oxide"

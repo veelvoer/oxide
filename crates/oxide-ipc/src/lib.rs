@@ -37,6 +37,8 @@ pub enum Request {
     /// Tell Oxide about the state of a program, for the telemetry borders and context-aware layout:
     /// `state` is "busy", "error", "ok" or "clear"; `pid` is a process inside the window (e.g. your shell).
     Signal { pid: Option<u32>, state: String },
+    /// The "Oxide was updated" note was read.
+    WhatsNewSeen,
     /// Emergency: drop a screen lock whose locker is gone (also `oxide-ctl unlock` from another TTY).
     ForceUnlock,
 }
@@ -84,9 +86,18 @@ pub struct State {
     /// The config file has an error: Oxide keeps running with the last good settings until it is fixed.
     #[serde(default)]
     pub config_error: Option<ConfigProblem>,
+    /// Oxide was updated since the last login: what changed (shown once).
+    #[serde(default)]
+    pub whats_new: Option<WhatsNew>,
     /// The Super key is being held on its own (the shell shows its ambient HUD while it is).
     #[serde(default)]
     pub super_held: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct WhatsNew {
+    pub version: String,
+    pub changes: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

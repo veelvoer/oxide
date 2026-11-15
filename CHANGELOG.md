@@ -2,6 +2,12 @@
 
 ## 0.2.0 (unreleased)
 
+* New: **automatic updates** from the git repository (`oxide-ctl update`), with an "Oxide was updated" card
+  after the next login; Settings → Config → Updates.
+* New: the phone app reaches the PC **away from home** (UPnP, IPv6, VPN addresses, encrypted notes on ntfy),
+  goes **full screen** with pinch zoom, follows the phone's **Material You** colors, updates itself, and wakes a PC
+  through another one that is on.
+* Fixed: Electron apps that place their own views (like Lodica) kept their default size inside a tiled window.
 * New: **overview** (`Super+Tab`): a live map of all workspaces, drag windows between them.
 * New: **macro scratchpads**: one key summons or dismisses a group of apps laid out side by side.
 * New: **zero-bar mode** with a HUD while `Super` is held.

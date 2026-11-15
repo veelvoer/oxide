@@ -677,7 +677,8 @@ pub fn apps(app: &mut App, ui: &mut Ui) {
 }
 
 pub fn config(app: &mut App, ui: &mut Ui) {
-    page_header(ui, "cog-outline", "Config", "Import, reset and file");
+    page_header(ui, "cog-outline", "Config", "Updates, import, reset and file");
+    updates_card(app, ui);
     let path = oxide_config::Config::path();
     card(ui, "Your config file", |ui| {
         row(ui, "Location", &path.display().to_string(), false, |ui| {
@@ -775,4 +776,76 @@ fn layout_cards(ui: &mut Ui, value: &mut LayoutKind) {
             p.text(egui::pos2(rect.left() + 16.0, rect.top() + 144.0), egui::Align2::LEFT_TOP, help, egui::FontId::proportional(12.5), MUTED());
         }
     });
+}
+
+/// The updater's state file (written by `oxide-ctl update`), read at most once a second.
+fn update_status() -> serde_json::Value {
+    thread_local! {
+        static CACHE: std::cell::RefCell<(Option<std::time::Instant>, serde_json::Value)> = Default::default();
+    }
+    CACHE.with(|c| {
+        let mut c = c.borrow_mut();
+        if c.0.is_none_or(|t| t.elapsed() > std::time::Duration::from_secs(1)) {
+            let dir = std::env::var_os("XDG_STATE_HOME")
+                .map(std::path::PathBuf::from)
+                .unwrap_or_else(|| std::path::PathBuf::from(std::env::var_os("HOME").unwrap_or_default()).join(".local/state"));
+            c.1 = std::fs::read_to_string(dir.join("oxide/update.json")).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default();
+            c.0 = Some(std::time::Instant::now());
+        }
+        c.1.clone()
+    })
+}
+
+fn ago(secs: u64) -> String {
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+    let d = now.saturating_sub(secs);
+    match d {
+        0..=59 => "just now".into(),
+        60..=3599 => format!("{} min ago", d / 60),
+        3600..=86399 => format!("{} h ago", d / 3600),
+        _ => format!("{} days ago", d / 86400),
+    }
+}
+
+fn updates_card(app: &mut App, ui: &mut Ui) {
+    let st = update_status();
+    // "abc1234", or "abc1234-dirty" for a build with local changes
+    let short = |v: &serde_json::Value| v.as_str().map(|s| format!("{}{}", s.chars().take(7).collect::<String>(), if s.ends_with("-dirty") { "-dirty" } else { "" }));
+    let installed = short(&st["installed"]);
+    let latest = short(&st["latest"]);
+    let running = st["running"].as_bool() == Some(true);
+    card(ui, "Updates", |ui| {
+        let sub = match (&installed, &latest) {
+            _ if running => "Building the new version in the background. It is used after you log out and back in.".to_string(),
+            (Some(i), Some(l)) if i != l && !i.ends_with("dirty") => format!("Version {i} installed, {l} is available."),
+            (Some(i), _) if i.ends_with("dirty") => "Built from a copy with local changes: not updated automatically.".to_string(),
+            (Some(i), _) => format!("Version {i}{}", st["checked"].as_u64().map(|t| format!(", checked {}", ago(t))).unwrap_or_default()),
+            (None, _) => "Version unknown (installed without git).".to_string(),
+        };
+        row_sub(ui, "rocket-launch-outline", "Oxide", &sub, false, |ui| {
+            if running {
+                ui.spinner();
+            } else {
+                let newer = matches!((&installed, &latest), (Some(i), Some(l)) if i != l && !i.ends_with("dirty"));
+                let label = if newer { "Update now" } else { "Check now" };
+                let clicked = if newer { primary_button(ui, label).clicked() } else { ghost_button(ui, label).clicked() };
+                if clicked {
+                    let args: &[&str] = if newer { &["update", "run"] } else { &["update", "check"] };
+                    if let Ok(mut c) = std::process::Command::new("oxide-ctl").args(args).stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null()).spawn() {
+                        std::thread::spawn(move || {
+                            let _ = c.wait();
+                        });
+                        app.say(if newer { "Updating in the background" } else { "Checking…" });
+                    }
+                }
+            }
+        });
+        if let Some(e) = st["error"].as_str() {
+            row_full(ui, Some("alert-circle-outline"), "Last attempt failed", e, "", false, |_| {});
+        }
+        row_sub(ui, "refresh", "Update automatically", "Now and then, at the lowest priority. What changed is shown after the next login.", true, |ui| {
+            switch(ui, &mut app.cfg.update.auto);
+        });
+    });
+    ui.ctx().request_repaint_after(std::time::Duration::from_secs(1));
 }

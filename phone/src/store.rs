@@ -11,6 +11,11 @@ pub struct Pc {
     pub port: u16,
     pub macs: Vec<String>,
     pub ltk: String,
+    /// where the PC said it can be reached away from home ("host:port"), and the server with its notes
+    pub remote: Vec<String>,
+    pub rendezvous: String,
+    /// the PC's Oxide colors (for "Match my PC")
+    pub palette: Vec<String>,
 }
 
 impl Pc {
@@ -31,6 +36,8 @@ pub struct Store {
     /// screen: quality and touch mode
     pub quality: u8,
     pub touchpad: bool,
+    /// "phone" (Material You), "pc" (the last PC's Oxide theme), "dark", "light"
+    pub theme: String,
     #[serde(skip)]
     pub dir: PathBuf,
 }
@@ -39,6 +46,9 @@ impl Store {
     pub fn load(dir: PathBuf) -> Self {
         let mut s: Store = std::fs::read_to_string(dir.join("pcs.json")).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default();
         s.dir = dir;
+        if s.theme.is_empty() {
+            s.theme = "phone".into();
+        }
         if s.phone_id.is_empty() {
             s.phone_id = oxide_remote_proto::hex(&oxide_remote_proto::random::<8>());
             s.phone_name = "Phone".into();
@@ -57,9 +67,12 @@ impl Store {
         }
     }
 
+    /// A newly paired PC (paired again: it keeps its place in the list).
     pub fn upsert(&mut self, pc: Pc) {
-        self.pcs.retain(|p| p.id != pc.id);
-        self.pcs.push(pc);
+        match self.pcs.iter_mut().find(|p| p.id == pc.id) {
+            Some(p) => *p = pc,
+            None => self.pcs.push(pc),
+        }
         self.save();
     }
 }

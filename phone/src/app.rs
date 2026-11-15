@@ -1,4 +1,4 @@
-//! The Oxide Remote app: your PCs, pairing, and per PC the screen, the numbers and the controls.
+//! The Oxide Remote app: your PCs, pairing, and per PC the screen (also full screen), the numbers and the controls.
 use std::{
     collections::{HashMap, VecDeque},
     path::PathBuf,
@@ -6,14 +6,20 @@ use std::{
     time::{Duration, Instant},
 };
 
-use egui::{vec2, Align, Color32, Layout, RichText, Sense, Stroke, Ui};
-use oxide_remote_proto::{Announce, Stats, ToPc, ToPhone};
+use egui::{vec2, Align2, Color32, Pos2, Rect, RichText, Sense, Ui, Vec2};
+use oxide_remote_proto::{Announce, PcInfo, Stats, ToPc, ToPhone};
 
 use crate::{
-    net::{self, Event, PairEvent, Session},
+    net::{self, Event, PairEvent, Route, Session},
+    platform,
     store::Store,
     theme::*,
+    ui::{self, ic, tap, Kind},
 };
+
+pub const VERSION: &str = env!("CARGO_PKG_VERSION");
+const RELEASES: &str = "https://api.github.com/repos/veelvoer/oxide/releases?per_page=20";
+const SOURCE: &str = "https://github.com/veelvoer/oxide";
 
 #[derive(PartialEq, Clone, Copy)]
 enum Tab {
@@ -22,10 +28,17 @@ enum Tab {
     Control,
 }
 
+#[derive(PartialEq, Clone, Copy)]
 enum Page {
     Home,
     Add,
+    Settings,
     Pc(usize),
+}
+
+enum Confirm {
+    Forget(usize),
+    Power(&'static str),
 }
 
 struct Pairing {
@@ -34,13 +47,16 @@ struct Pairing {
     code_tx: std::sync::mpsc::Sender<String>,
     pc_name: Option<String>,
     code: String,
+    sent: bool,
 }
 
 struct Live {
     session: Session,
     connected: Option<String>,
+    route: Option<Route>,
     error: Option<String>,
     stats: Option<Stats>,
+    info: Option<PcInfo>,
     cpu_hist: VecDeque<f32>,
     mem_hist: VecDeque<f32>,
     net_hist: VecDeque<f32>,
@@ -49,13 +65,31 @@ struct Live {
     fps: f32,
     last_frame: Option<Instant>,
     kbps: f32,
-    streaming: bool,
+    /// what the PC streams now: (max width, quality, fps)
+    streaming: Option<(u32, u8, u8)>,
     last_stats: Instant,
-    notice: Option<(String, bool, Instant)>,
     clipboard: String,
     text: String,
+    open: String,
     volume: f32,
-    confirm: Option<&'static str>,
+}
+
+/// The newest app version on GitHub: (version, APK address).
+#[derive(Default)]
+struct Update {
+    rx: Option<Receiver<Result<Option<(String, String)>, String>>>,
+    latest: Option<(String, String)>,
+    checked: bool,
+    error: Option<String>,
+}
+
+/// Full-screen view: zoom and the toolbar.
+struct Full {
+    zoom: f32,
+    pan: Vec2,
+    bar_until: Instant,
+    typing: bool,
+    text: String,
 }
 
 pub struct App {
@@ -67,21 +101,45 @@ pub struct App {
     manual_host: String,
     pairing: Option<Pairing>,
     pair_error: Option<String>,
-    online: Arc<Mutex<HashMap<String, bool>>>,
+    /// per PC: None = offline; missing = not checked yet
+    online: Arc<Mutex<HashMap<String, Option<Route>>>>,
     last_probe: Instant,
     live: Option<Live>,
     toast: Option<(String, Instant)>,
     ctx: egui::Context,
+    /// system bars and keyboard in points: top, bottom, left, right, keyboard
+    insets: [f32; 5],
+    last_platform: Instant,
+    last_theme: Instant,
+    pal: Pal,
+    full: Option<Full>,
+    confirm: Option<Confirm>,
+    sheet: Option<usize>,
+    update: Update,
 }
 
 fn human_bytes(b: u64) -> String {
     let b = b as f64;
-    if b >= 1e12 { format!("{:.1} TB", b / 1e12) } else if b >= 1e9 { format!("{:.1} GB", b / 1e9) } else if b >= 1e6 { format!("{:.0} MB", b / 1e6) } else { format!("{:.0} KB", b / 1e3) }
+    if b >= 1e12 {
+        format!("{:.1} TB", b / 1e12)
+    } else if b >= 1e9 {
+        format!("{:.1} GB", b / 1e9)
+    } else if b >= 1e6 {
+        format!("{:.0} MB", b / 1e6)
+    } else {
+        format!("{:.0} KB", b / 1e3)
+    }
 }
 
 fn rate(b: u64) -> String {
     let b = b as f64 * 8.0;
-    if b >= 1e9 { format!("{:.1} Gb/s", b / 1e9) } else if b >= 1e6 { format!("{:.1} Mb/s", b / 1e6) } else { format!("{:.0} kb/s", b / 1e3) }
+    if b >= 1e9 {
+        format!("{:.1} Gb/s", b / 1e9)
+    } else if b >= 1e6 {
+        format!("{:.1} Mb/s", b / 1e6)
+    } else {
+        format!("{:.0} kb/s", b / 1e3)
+    }
 }
 
 fn push(h: &mut VecDeque<f32>, v: f32) {
@@ -91,91 +149,42 @@ fn push(h: &mut VecDeque<f32>, v: f32) {
     }
 }
 
-/// A card: rounded surface with a hairline border.
-fn card<R>(ui: &mut Ui, f: impl FnOnce(&mut Ui) -> R) -> R {
-    egui::Frame::new().fill(CARD).stroke(Stroke::new(1.0, LINE)).corner_radius(r(16)).inner_margin(egui::Margin::same(16)).show(ui, |ui| {
-        ui.set_width(ui.available_width());
-        f(ui)
-    }).inner
+fn semver(v: &str) -> (u32, u32, u32) {
+    let mut it = v.trim_start_matches('v').split('.').map(|n| n.parse().unwrap_or(0));
+    (it.next().unwrap_or(0), it.next().unwrap_or(0), it.next().unwrap_or(0))
 }
 
-fn label(ui: &mut Ui, t: &str) {
-    ui.add_space(6.0);
-    ui.label(RichText::new(t.to_uppercase()).size(12.0).color(MUTED).extra_letter_spacing(1.2));
-}
-
-fn primary(ui: &mut Ui, text: &str) -> egui::Response {
-    ui.add(egui::Button::new(RichText::new(text).color(INK).strong()).fill(ACCENT).corner_radius(r(22)).min_size(vec2(0.0, 44.0)))
-}
-
-fn ghost(ui: &mut Ui, text: &str) -> egui::Response {
-    ui.add(egui::Button::new(RichText::new(text).color(TEXT)).fill(RAISED).stroke(Stroke::new(1.0, LINE)).corner_radius(r(22)).min_size(vec2(0.0, 44.0)))
-}
-
-fn danger(ui: &mut Ui, text: &str) -> egui::Response {
-    ui.add(egui::Button::new(RichText::new(text).color(BAD)).fill(RAISED).stroke(Stroke::new(1.0, BAD.gamma_multiply(0.6))).corner_radius(r(22)).min_size(vec2(0.0, 44.0)))
-}
-
-/// A small line chart of the last minute.
-fn spark(ui: &mut Ui, hist: &VecDeque<f32>, color: Color32, max: f32) {
-    let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), 46.0), Sense::hover());
-    let p = ui.painter();
-    p.rect_filled(rect, r(10), DEEP);
-    if hist.len() < 2 {
-        return;
-    }
-    let n = 60usize;
-    let pts: Vec<egui::Pos2> = hist
-        .iter()
-        .enumerate()
-        .map(|(i, v)| {
-            let x = rect.right() - (hist.len() - 1 - i) as f32 * rect.width() / (n - 1) as f32;
-            let y = rect.bottom() - 4.0 - (v / max.max(1e-6)).clamp(0.0, 1.0) * (rect.height() - 8.0);
-            egui::pos2(x, y)
-        })
-        .collect();
-    let mut fill = pts.clone();
-    fill.push(egui::pos2(pts.last().unwrap().x, rect.bottom()));
-    fill.push(egui::pos2(pts[0].x, rect.bottom()));
-    p.add(egui::Shape::convex_polygon(fill, color.gamma_multiply(0.15), Stroke::NONE));
-    p.add(egui::Shape::line(pts, Stroke::new(2.0, color)));
-}
-
-/// Previous (0), play/pause (1), next (2), drawn so they look the same on every phone.
-fn media_icon(ui: &Ui, c: egui::Pos2, kind: u8) {
-    let p = ui.painter();
-    let tri = |dir: f32, x: f32| {
-        vec![egui::pos2(c.x + x - 7.0 * dir, c.y - 9.0), egui::pos2(c.x + x + 7.0 * dir, c.y), egui::pos2(c.x + x - 7.0 * dir, c.y + 9.0)]
-    };
-    match kind {
-        0 => {
-            p.add(egui::Shape::convex_polygon(tri(-1.0, 2.0), TEXT, Stroke::NONE));
-            p.rect_filled(egui::Rect::from_center_size(egui::pos2(c.x - 9.0, c.y), vec2(3.0, 18.0)), r(1), TEXT);
+/// The newest OxideRemote-X.Y.Z.apk attached to a release.
+fn newest_apk(json: &str) -> Option<(String, String)> {
+    let releases: serde_json::Value = serde_json::from_str(json).ok()?;
+    let mut best: Option<(String, String)> = None;
+    for r in releases.as_array()? {
+        if r["draft"].as_bool() == Some(true) {
+            continue;
         }
-        2 => {
-            p.add(egui::Shape::convex_polygon(tri(1.0, -2.0), TEXT, Stroke::NONE));
-            p.rect_filled(egui::Rect::from_center_size(egui::pos2(c.x + 9.0, c.y), vec2(3.0, 18.0)), r(1), TEXT);
-        }
-        _ => {
-            p.add(egui::Shape::convex_polygon(tri(1.0, -7.0), ACCENT, Stroke::NONE));
-            p.rect_filled(egui::Rect::from_center_size(egui::pos2(c.x + 6.0, c.y), vec2(4.0, 18.0)), r(1), ACCENT);
-            p.rect_filled(egui::Rect::from_center_size(egui::pos2(c.x + 13.0, c.y), vec2(4.0, 18.0)), r(1), ACCENT);
+        for a in r["assets"].as_array().into_iter().flatten() {
+            let name = a["name"].as_str().unwrap_or("");
+            let Some(v) = name.strip_prefix("OxideRemote-").and_then(|n| n.strip_suffix(".apk")) else { continue };
+            let url = a["browser_download_url"].as_str().unwrap_or("").to_string();
+            if best.as_ref().is_none_or(|(b, _)| semver(v) > semver(b)) {
+                best = Some((v.to_string(), url));
+            }
         }
     }
-}
-
-fn bar(ui: &mut Ui, frac: f32, color: Color32) {
-    let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), 8.0), Sense::hover());
-    ui.painter().rect_filled(rect, r(4), DEEP);
-    let mut f = rect;
-    f.set_width(rect.width() * frac.clamp(0.0, 1.0));
-    ui.painter().rect_filled(f, r(4), color);
+    best
 }
 
 impl App {
-    pub fn new(ctx: &egui::Context, dir: PathBuf, scale: f32) -> Self {
-        apply(ctx, scale);
-        let store = Store::load(dir);
+    pub fn new(ctx: &egui::Context, dir: PathBuf) -> Self {
+        fonts(ctx);
+        let mut store = Store::load(dir);
+        // the name PCs show for this phone: the phone's own name rather than "Phone"
+        if store.phone_name == "Phone" {
+            if let Some(n) = platform::device_name() {
+                store.phone_name = n;
+                store.save();
+            }
+        }
         let mut a = Self {
             store,
             page: Page::Home,
@@ -190,13 +199,73 @@ impl App {
             live: None,
             toast: None,
             ctx: ctx.clone(),
+            insets: [0.0; 5],
+            last_platform: Instant::now() - Duration::from_secs(10),
+            last_theme: Instant::now() - Duration::from_secs(10),
+            pal: Pal::oxide(true),
+            full: None,
+            confirm: None,
+            sheet: None,
+            update: Update::default(),
         };
+        a.refresh_theme();
         if a.store.pcs.is_empty() {
             a.page = Page::Add;
             a.scan();
         }
+        a.check_update();
         a
     }
+
+    fn say(&mut self, t: impl Into<String>) {
+        self.toast = Some((t.into(), Instant::now()));
+    }
+
+    // ------------------------------------------------------------------ phone and theme
+
+    fn refresh_theme(&mut self) {
+        let dark = platform::dark().unwrap_or(true);
+        let pal = match self.store.theme.as_str() {
+            "pc" => self.store.pcs.iter().rev().find_map(|p| Pal::from_pc(&p.palette)).unwrap_or_else(|| Pal::oxide(dark)),
+            "oxide" => Pal::oxide(dark),
+            _ => Pal::material(dark, &platform::system_colors()).unwrap_or_else(|| Pal::oxide(dark)),
+        };
+        if pal != self.pal || self.last_theme.elapsed() > Duration::from_secs(3600) {
+            platform::light_bars(!pal.dark);
+        }
+        self.pal = pal;
+        apply(&self.ctx, pal);
+        self.last_theme = Instant::now();
+    }
+
+    fn refresh_platform(&mut self) {
+        if self.last_platform.elapsed() > Duration::from_millis(300) {
+            let ppp = self.ctx.pixels_per_point().max(0.5);
+            let i = platform::insets();
+            self.insets = [i[0] as f32 / ppp, i[1] as f32 / ppp, i[2] as f32 / ppp, i[3] as f32 / ppp, i[4] as f32 / ppp];
+            self.last_platform = Instant::now();
+        }
+        if self.last_theme.elapsed() > Duration::from_secs(2) {
+            self.refresh_theme();
+        }
+    }
+
+    fn check_update(&mut self) {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let ctx = self.ctx.clone();
+        std::thread::spawn(move || {
+            let r = match platform::http_get(RELEASES) {
+                Some(json) => Ok(newest_apk(&json).filter(|(v, _)| semver(v) > semver(VERSION))),
+                None => Err("Could not reach GitHub.".to_string()),
+            };
+            let _ = tx.send(r);
+            ctx.request_repaint();
+        });
+        self.update.rx = Some(rx);
+        self.update.error = None;
+    }
+
+    // ------------------------------------------------------------------ network
 
     fn scan(&mut self) {
         let (tx, rx) = std::sync::mpsc::channel();
@@ -217,8 +286,8 @@ impl App {
             let online = self.online.clone();
             let ctx = self.ctx.clone();
             std::thread::spawn(move || {
-                let ok = net::reachable(&pc);
-                online.lock().unwrap().insert(pc.id.clone(), ok);
+                let r = net::reachable(&pc);
+                online.lock().unwrap().insert(pc.id.clone(), r);
                 ctx.request_repaint();
             });
         }
@@ -230,8 +299,10 @@ impl App {
         self.live = Some(Live {
             session,
             connected: None,
+            route: None,
             error: None,
             stats: None,
+            info: None,
             cpu_hist: VecDeque::new(),
             mem_hist: VecDeque::new(),
             net_hist: VecDeque::new(),
@@ -240,56 +311,190 @@ impl App {
             fps: 0.0,
             last_frame: None,
             kbps: 0.0,
-            streaming: false,
+            streaming: None,
             last_stats: Instant::now() - Duration::from_secs(5),
-            notice: None,
             clipboard: String::new(),
             text: String::new(),
+            open: String::new(),
             volume: 0.5,
-            confirm: None,
         });
         self.page = Page::Pc(i);
+        platform::keep_screen_on(true);
     }
 
     fn close_pc(&mut self) {
         if let Some(l) = &self.live {
             let _ = l.session.to_pc.send(ToPc::ScreenStop);
         }
+        self.exit_full();
         self.live = None;
         self.page = Page::Home;
+        self.last_probe = Instant::now() - Duration::from_secs(60);
+        platform::keep_screen_on(false);
     }
+
+    fn enter_full(&mut self) {
+        self.full = Some(Full { zoom: 1.0, pan: Vec2::ZERO, bar_until: Instant::now() + Duration::from_secs(3), typing: false, text: String::new() });
+        platform::set_fullscreen(true);
+        platform::haptic(2);
+    }
+
+    fn exit_full(&mut self) {
+        if self.full.take().is_some() {
+            platform::set_fullscreen(false);
+        }
+    }
+
+    /// Wake a PC: the magic packet from here (works at home), and through every other PC that is on (works away).
+    fn wake(&mut self, i: usize) {
+        let pc = self.store.pcs[i].clone();
+        let mut ok = false;
+        for m in &pc.macs {
+            ok |= oxide_remote_proto::wake(m, pc.subnet_broadcast()).is_ok();
+        }
+        let online = self.online.lock().unwrap().clone();
+        let helpers: Vec<_> = self.store.pcs.iter().filter(|p| p.id != pc.id && online.get(&p.id).is_some_and(|r| r.is_some())).cloned().collect();
+        for h in &helpers {
+            let msgs = pc.macs.iter().map(|m| ToPc::Action { name: "wake".into(), arg: Some(format!("{m} {}", pc.host)) }).collect();
+            let (h, id) = (h.clone(), self.store.phone_id.clone());
+            std::thread::spawn(move || {
+                let _ = net::one_shot(&h, &id, msgs);
+            });
+        }
+        let via = if helpers.is_empty() { String::new() } else { format!(" (also through {})", helpers.iter().map(|h| h.name.as_str()).collect::<Vec<_>>().join(", ")) };
+        self.say(if ok || !helpers.is_empty() { format!("Wake-up sent to {}{via}", pc.name) } else { "Could not send the wake-up packet".into() });
+        self.last_probe = Instant::now() - Duration::from_secs(4);
+    }
+
+    // ------------------------------------------------------------------ frame
 
     pub fn frame(&mut self, ui: &mut Ui) {
         let ctx = ui.ctx().clone();
+        self.refresh_platform();
         self.poll(&ctx);
-        egui::Frame::new().fill(BG).inner_margin(egui::Margin { left: 16, right: 16, top: 10, bottom: 10 }).show(ui, |ui| {
-            ui.set_min_size(ui.available_size());
-            match self.page {
-                Page::Home => self.home(ui),
-                Page::Add => self.add(ui),
-                Page::Pc(i) => self.pc(ui, i),
-            }
+        let p = pal();
+        let full_rect = ui.max_rect();
+        ui.painter().rect_filled(full_rect, 0.0, p.bg);
+
+        // the system back gesture
+        if ui.input(|i| i.key_pressed(egui::Key::BrowserBack) || i.key_pressed(egui::Key::Escape)) {
+            self.back();
+        }
+
+        if self.full.is_some() && self.live.as_ref().is_some_and(|l| l.texture.is_some()) {
+            self.fullscreen(ui, full_rect);
+            self.overlays(&ctx);
+            return;
+        }
+
+        let [top, bottom, left, right, kb] = self.insets;
+        let nav = matches!(self.page, Page::Pc(_));
+        let nav_h = if nav { 76.0 + bottom } else { 0.0 };
+        let bottom_space = if kb > 0.0 { kb } else if nav { nav_h } else { bottom };
+        let inner = Rect::from_min_max(
+            Pos2::new(full_rect.left() + left + 16.0, full_rect.top() + top + 4.0),
+            Pos2::new(full_rect.right() - right - 16.0, full_rect.bottom() - bottom_space),
+        );
+        ui.scope_builder(egui::UiBuilder::new().max_rect(inner), |ui| match self.page {
+            Page::Home => self.home(ui),
+            Page::Add => self.add(ui),
+            Page::Settings => self.settings(ui),
+            Page::Pc(i) => self.pc(ui, i),
         });
+        if nav && kb <= 0.0 {
+            let items = [(ic::MONITOR, "Screen"), (ic::CHART, "Stats"), (ic::SLIDERS, "Control")];
+            let sel = match self.tab {
+                Tab::Screen => 0,
+                Tab::Stats => 1,
+                Tab::Control => 2,
+            };
+            if let Some(n) = ui::nav_bar(ui, &items, sel, bottom) {
+                self.tab = [Tab::Screen, Tab::Stats, Tab::Control][n];
+            }
+        }
+        if self.page == Page::Home && !self.store.pcs.is_empty() {
+            self.fab(&ctx, bottom + 16.0, right + 16.0);
+        }
+        self.overlays(&ctx);
+    }
+
+    fn back(&mut self) {
+        if self.confirm.take().is_some() || self.sheet.take().is_some() {
+            return;
+        }
+        if self.full.is_some() {
+            self.exit_full();
+            return;
+        }
+        match self.page {
+            Page::Pc(_) => self.close_pc(),
+            Page::Add if !self.store.pcs.is_empty() => {
+                self.pairing = None;
+                self.page = Page::Home;
+            }
+            Page::Settings => self.page = Page::Home,
+            _ => {}
+        }
+    }
+
+    /// Dialogs, the PC sheet and messages.
+    fn overlays(&mut self, ctx: &egui::Context) {
+        let p = pal();
+        if let Some(c) = &self.confirm {
+            let (glyph, title, text, yes, danger) = match c {
+                Confirm::Forget(i) => (ic::TRASH, "Forget this PC?", format!("{} has to be paired again to use it from this phone.", self.store.pcs.get(*i).map(|p| p.name.as_str()).unwrap_or("The PC")), "Forget", true),
+                Confirm::Power("suspend") => (ic::MOON, "Put the PC to sleep?", "Wake it up again with Wake up.".to_string(), "Sleep", false),
+                Confirm::Power("reboot") => (ic::RESTART, "Restart the PC?", "Unsaved work on the PC is lost.".to_string(), "Restart", true),
+                Confirm::Power(_) => (ic::POWER, "Shut the PC down?", "Unsaved work on the PC is lost.".to_string(), "Shut down", true),
+            };
+            match ui::dialog(ctx, glyph, title, &text, yes, danger) {
+                Some(true) => {
+                    platform::haptic(2);
+                    match self.confirm.take() {
+                        Some(Confirm::Forget(i)) if i < self.store.pcs.len() => {
+                            let name = self.store.pcs.remove(i).name;
+                            self.store.save();
+                            self.say(format!("Forgot {name}"));
+                        }
+                        Some(Confirm::Power(a)) => self.send(ToPc::Action { name: a.into(), arg: None }),
+                        _ => {}
+                    }
+                }
+                Some(false) => self.confirm = None,
+                None => {}
+            }
+        }
+        if let Some(i) = self.sheet {
+            self.pc_sheet(ctx, i);
+        }
         if let Some((t, at)) = &self.toast {
-            if at.elapsed() < Duration::from_secs(3) {
-                egui::Area::new(egui::Id::unique("toast")).anchor(egui::Align2::CENTER_BOTTOM, vec2(0.0, -40.0)).show(&ctx, |ui| {
-                    egui::Frame::new().fill(RAISED).stroke(Stroke::new(1.0, LINE)).corner_radius(r(20)).inner_margin(egui::Margin::symmetric(18, 12)).show(ui, |ui| {
-                        ui.label(RichText::new(t).color(TEXT));
-                    });
-                });
+            if at.elapsed() < Duration::from_millis(2800) {
+                let bottom = self.insets[1] + if matches!(self.page, Page::Pc(_)) && self.full.is_none() { 76.0 } else { 0.0 };
+                ui::snackbar(ctx, &t.clone(), bottom);
                 ctx.request_repaint_after(Duration::from_millis(200));
             } else {
                 self.toast = None;
             }
         }
+        let _ = p;
     }
 
-    /// Network events into state.
+    /// Network and phone events into state.
     fn poll(&mut self, ctx: &egui::Context) {
         if let Some(rx) = &self.scanning {
             if let Ok(found) = rx.try_recv() {
                 self.found = found;
                 self.scanning = None;
+            }
+        }
+        if let Some(rx) = &self.update.rx {
+            if let Ok(r) = rx.try_recv() {
+                self.update.rx = None;
+                self.update.checked = true;
+                match r {
+                    Ok(latest) => self.update.latest = latest,
+                    Err(e) => self.update.error = Some(e),
+                }
             }
         }
         if let Some(p) = &mut self.pairing {
@@ -304,6 +509,7 @@ impl App {
                         self.page = Page::Home;
                         self.last_probe = Instant::now() - Duration::from_secs(60);
                         self.toast = Some((format!("Paired with {name}"), Instant::now()));
+                        platform::haptic(2);
                         break;
                     }
                     PairEvent::Done(Err(e)) => {
@@ -314,13 +520,42 @@ impl App {
                 }
             }
         }
+        let pc_idx = match self.page {
+            Page::Pc(i) => Some(i),
+            _ => None,
+        };
+        let mut save_store = false;
         let Some(l) = &mut self.live else { return };
         while let Ok(ev) = l.session.events.try_recv() {
             match ev {
-                Event::Connected { pc_name } => {
+                Event::Connected { pc_name, route } => {
                     l.connected = Some(pc_name);
+                    l.route = Some(route);
                     l.error = None;
+                    let _ = l.session.to_pc.send(ToPc::Info);
                     let _ = l.session.to_pc.send(ToPc::Stats);
+                }
+                Event::Moved(w) | Event::Msg(ToPhone::Whereabouts(w)) => {
+                    if let Some(pc) = pc_idx.and_then(|i| self.store.pcs.get_mut(i)) {
+                        if pc.remote != w.addrs || pc.rendezvous != w.rendezvous {
+                            pc.remote = w.addrs;
+                            pc.rendezvous = w.rendezvous;
+                            save_store = true;
+                        }
+                    }
+                }
+                Event::Msg(ToPhone::Info(info)) => {
+                    if let Some(pc) = pc_idx.and_then(|i| self.store.pcs.get_mut(i)) {
+                        if pc.palette != info.palette && !info.palette.is_empty() {
+                            pc.palette = info.palette.clone();
+                            save_store = true;
+                        }
+                        if !info.macs.is_empty() && pc.macs != info.macs {
+                            pc.macs = info.macs.clone();
+                            save_store = true;
+                        }
+                    }
+                    l.info = Some(info);
                 }
                 Event::Msg(ToPhone::Stats(s)) => {
                     push(&mut l.cpu_hist, s.cpu);
@@ -333,12 +568,12 @@ impl App {
                 }
                 Event::Msg(ToPhone::Done { ok, message }) => {
                     if !ok || !message.is_empty() {
-                        l.notice = Some((if message.is_empty() { "Done".into() } else { message }, ok, Instant::now()));
+                        self.toast = Some((if message.is_empty() { "Done".into() } else { message }, Instant::now()));
                     }
                 }
                 Event::Msg(ToPhone::Clipboard { text }) => {
                     l.clipboard = text;
-                    l.notice = Some(("Got the PC's clipboard".into(), true, Instant::now()));
+                    self.toast = Some(("Got the PC's clipboard".into(), Instant::now()));
                 }
                 Event::Msg(_) => {}
                 Event::Frame { seq, rgba, w, h, full, bytes } => {
@@ -359,271 +594,39 @@ impl App {
                 Event::Closed(e) => {
                     l.error = Some(e);
                     l.connected = None;
-                    l.streaming = false;
+                    l.streaming = None;
                 }
             }
         }
-        // numbers once a second while that tab is open
-        if l.connected.is_some() && self.tab == Tab::Stats && l.last_stats.elapsed() > Duration::from_secs(1) {
+        // numbers once a second while they are shown
+        if l.connected.is_some() && self.full.is_none() && self.tab != Tab::Screen && l.last_stats.elapsed() > Duration::from_secs(1) {
             l.last_stats = Instant::now();
             let _ = l.session.to_pc.send(ToPc::Stats);
             ctx.request_repaint_after(Duration::from_millis(1000));
         }
-        // the screen streams only while it is visible
-        let want = l.connected.is_some() && self.tab == Tab::Screen;
+        // the screen streams only while it is visible; sharper at home and in full screen
+        let visible = l.connected.is_some() && (self.tab == Tab::Screen || self.full.is_some());
+        let want = visible.then(|| {
+            let away = l.route == Some(Route::Away);
+            let w = if self.full.is_some() { 1920 } else { 1280 };
+            let q = self.store.quality.clamp(20, 90);
+            if away {
+                (w.min(1280), q.min(55), 20)
+            } else {
+                (w, q, 30)
+            }
+        });
         if want != l.streaming {
+            if l.streaming.is_some() {
+                let _ = l.session.to_pc.send(ToPc::ScreenStop);
+            }
+            if let Some((max_w, quality, fps)) = want {
+                let _ = l.session.to_pc.send(ToPc::ScreenStart { max_w, quality, fps, output: None });
+            }
             l.streaming = want;
-            let _ = l.session.to_pc.send(if want { ToPc::ScreenStart { max_w: 1280, quality: self.store.quality.clamp(20, 90), fps: 30, output: None } } else { ToPc::ScreenStop });
         }
-    }
-
-    // ------------------------------------------------------------------ pages
-
-    fn header(ui: &mut Ui, title: &str, sub: &str, back: bool) -> bool {
-        let mut go_back = false;
-        ui.horizontal(|ui| {
-            if back && ui.add(egui::Button::new(RichText::new("‹").size(26.0)).fill(Color32::TRANSPARENT).min_size(vec2(44.0, 44.0))).clicked() {
-                go_back = true;
-            }
-            ui.vertical(|ui| {
-                ui.label(RichText::new(title).size(24.0).strong());
-                if !sub.is_empty() {
-                    ui.label(RichText::new(sub).color(MUTED).size(14.0));
-                }
-            });
-        });
-        ui.add_space(8.0);
-        go_back
-    }
-
-    fn home(&mut self, ui: &mut Ui) {
-        self.probe();
-        ui.ctx().request_repaint_after(Duration::from_secs(3));
-        ui.horizontal(|ui| {
-            ui.vertical(|ui| {
-                ui.label(RichText::new("Oxide Remote").size(26.0).strong());
-                ui.label(RichText::new("Your PCs").color(MUTED));
-            });
-            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                if primary(ui, "  +  Add PC  ").clicked() {
-                    self.page = Page::Add;
-                    self.pair_error = None;
-                    self.scan();
-                }
-            });
-        });
-        ui.add_space(14.0);
-        let online = self.online.lock().unwrap().clone();
-        let mut open = None;
-        let mut forget = None;
-        egui::ScrollArea::vertical().show(ui, |ui| {
-            for (i, pc) in self.store.pcs.clone().iter().enumerate() {
-                let state = online.get(&pc.id).copied();
-                card(ui, |ui| {
-                    ui.horizontal(|ui| {
-                        let (dot, _) = ui.allocate_exact_size(vec2(12.0, 12.0), Sense::hover());
-                        ui.painter().circle_filled(dot.center(), 6.0, match state {
-                            Some(true) => GOOD,
-                            Some(false) => MUTED,
-                            None => LINE,
-                        });
-                        ui.vertical(|ui| {
-                            ui.label(RichText::new(&pc.name).size(18.0).strong());
-                            ui.label(RichText::new(format!("{}  ·  {}", pc.host, match state {
-                                Some(true) => "online",
-                                Some(false) => "offline",
-                                None => "checking…",
-                            })).color(MUTED).size(13.0));
-                        });
-                    });
-                    ui.add_space(8.0);
-                    ui.horizontal_wrapped(|ui| {
-                        if state == Some(true) {
-                            if primary(ui, "  Open  ").clicked() {
-                                open = Some(i);
-                            }
-                        } else if !pc.macs.is_empty() {
-                            if primary(ui, "  Wake up  ").clicked() {
-                                let mut ok = false;
-                                for m in &pc.macs {
-                                    ok |= oxide_remote_proto::wake(m, pc.subnet_broadcast()).is_ok();
-                                }
-                                self.toast = Some((if ok { format!("Wake-up sent to {}", pc.name) } else { "Could not send the wake-up packet".into() }, Instant::now()));
-                                self.last_probe = Instant::now() - Duration::from_secs(4);
-                            }
-                            if ghost(ui, "  Try to open  ").clicked() {
-                                open = Some(i);
-                            }
-                        } else if ghost(ui, "  Try to open  ").clicked() {
-                            open = Some(i);
-                        }
-                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                            if ui.add(egui::Button::new(RichText::new("Forget").color(MUTED)).fill(Color32::TRANSPARENT)).clicked() {
-                                forget = Some(i);
-                            }
-                        });
-                    });
-                });
-                ui.add_space(10.0);
-            }
-            if self.store.pcs.is_empty() {
-                ui.label(RichText::new("No PCs yet. Add one: it takes a code from the PC's Settings > Phone.").color(MUTED));
-            }
-        });
-        if let Some(i) = open {
-            self.open_pc(i);
-        }
-        if let Some(i) = forget {
-            self.store.pcs.remove(i);
+        if save_store {
             self.store.save();
-        }
-    }
-
-    fn add(&mut self, ui: &mut Ui) {
-        if Self::header(ui, "Add a PC", "On the PC: Settings > Phone > Pair a phone", !self.store.pcs.is_empty()) {
-            self.page = Page::Home;
-            self.pairing = None;
-            return;
-        }
-        // waiting for the code
-        if let Some(p) = &mut self.pairing {
-            card(ui, |ui| match &p.pc_name {
-                None => {
-                    ui.horizontal(|ui| {
-                        ui.spinner();
-                        ui.label(format!("Contacting {}…", p.host));
-                    });
-                }
-                Some(name) => {
-                    ui.label(RichText::new(format!("Enter the code {name} shows")).size(18.0).strong());
-                    ui.add_space(8.0);
-                    let resp = ui.add(egui::TextEdit::singleline(&mut p.code).hint_text("6 digits").font(egui::FontId::monospace(28.0)).desired_width(f32::INFINITY));
-                    p.code.retain(|c| c.is_ascii_digit());
-                    p.code.truncate(6);
-                    if !resp.has_focus() && p.code.is_empty() {
-                        resp.request_focus();
-                    }
-                    ui.add_space(8.0);
-                    let ready = p.code.len() == 6;
-                    if ui.add_enabled(ready, egui::Button::new(RichText::new("Pair").color(INK).strong()).fill(ACCENT).corner_radius(r(22)).min_size(vec2(ui.available_width(), 48.0))).clicked() {
-                        let _ = p.code_tx.send(p.code.clone());
-                        p.pc_name = Some(format!("{name} (checking…)"));
-                    }
-                }
-            });
-            ui.add_space(10.0);
-            if ghost(ui, "Cancel").clicked() {
-                self.pairing = None;
-            }
-            return;
-        }
-        if let Some(e) = &self.pair_error {
-            card(ui, |ui| {
-                ui.label(RichText::new(e).color(BAD));
-            });
-            ui.add_space(8.0);
-        }
-        label(ui, "On this network");
-        let mut start: Option<(String, u16)> = None;
-        card(ui, |ui| {
-            if self.scanning.is_some() {
-                ui.horizontal(|ui| {
-                    ui.spinner();
-                    ui.label(RichText::new("Looking for PCs…").color(MUTED));
-                });
-            } else if self.found.is_empty() {
-                ui.label(RichText::new("No PC found. Is oxide-remoted on (Settings > Phone) and the phone on the same Wi-Fi?").color(MUTED));
-            }
-            for (a, host) in self.found.clone() {
-                let paired = self.store.pcs.iter().any(|p| p.id == a.id);
-                ui.horizontal(|ui| {
-                    ui.vertical(|ui| {
-                        ui.label(RichText::new(&a.name).size(17.0).strong());
-                        ui.label(RichText::new(&host).color(MUTED).size(13.0));
-                    });
-                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        if primary(ui, if paired { "  Pair again  " } else { "  Pair  " }).clicked() {
-                            start = Some((host.clone(), a.port));
-                        }
-                    });
-                });
-                ui.separator();
-            }
-            if self.scanning.is_none() && ghost(ui, "Search again").clicked() {
-                self.scan();
-            }
-        });
-        label(ui, "Or by address");
-        card(ui, |ui| {
-            ui.add(egui::TextEdit::singleline(&mut self.manual_host).hint_text("192.168.1.20").desired_width(f32::INFINITY));
-            ui.add_space(6.0);
-            if primary(ui, "  Pair  ").clicked() && !self.manual_host.trim().is_empty() {
-                let (h, port) = match self.manual_host.trim().rsplit_once(':') {
-                    Some((h, p)) if p.parse::<u16>().is_ok() => (h.to_string(), p.parse().unwrap()),
-                    _ => (self.manual_host.trim().to_string(), oxide_remote_proto::TCP_PORT),
-                };
-                start = Some((h, port));
-            }
-        });
-        if let Some((host, port)) = start {
-            let (events, code_tx) = net::pair(host.clone(), port, self.store.phone_id.clone(), self.store.phone_name.clone());
-            self.pairing = Some(Pairing { host, events, code_tx, pc_name: None, code: String::new() });
-            self.pair_error = None;
-        }
-    }
-
-    fn pc(&mut self, ui: &mut Ui, i: usize) {
-        let name = self.store.pcs.get(i).map(|p| p.name.clone()).unwrap_or_default();
-        let status = match &self.live {
-            Some(l) if l.connected.is_some() => "connected".to_string(),
-            Some(l) if l.error.is_some() => l.error.clone().unwrap_or_default(),
-            _ => "connecting…".to_string(),
-        };
-        if Self::header(ui, &name, &status, true) {
-            self.close_pc();
-            return;
-        }
-        if self.live.as_ref().is_some_and(|l| l.error.is_some()) {
-            card(ui, |ui| {
-                ui.label(RichText::new(self.live.as_ref().and_then(|l| l.error.clone()).unwrap_or_default()).color(BAD));
-            });
-            ui.add_space(8.0);
-            if primary(ui, "  Reconnect  ").clicked() {
-                self.open_pc(i);
-            }
-            return;
-        }
-        // tabs as an inset segmented control
-        egui::Frame::new().fill(DEEP).stroke(Stroke::new(1.0, LINE)).corner_radius(r(24)).inner_margin(egui::Margin::same(4)).show(ui, |ui| {
-            ui.horizontal(|ui| {
-                ui.spacing_mut().item_spacing.x = 4.0;
-                let w = (ui.available_width() - 8.0) / 3.0;
-                for (t, label) in [(Tab::Screen, "Screen"), (Tab::Stats, "Stats"), (Tab::Control, "Control")] {
-                    let on = self.tab == t;
-                    let b = egui::Button::new(RichText::new(label).color(if on { INK } else { MUTED }).strong())
-                        .fill(if on { ACCENT } else { Color32::TRANSPARENT })
-                        .stroke(Stroke::NONE)
-                        .corner_radius(r(20))
-                        .min_size(vec2(w, 40.0));
-                    if ui.add(b).clicked() {
-                        self.tab = t;
-                    }
-                }
-            });
-        });
-        ui.add_space(10.0);
-        if let Some(l) = &mut self.live {
-            if let Some((t, ok, at)) = &l.notice {
-                if at.elapsed() < Duration::from_secs(3) {
-                    ui.label(RichText::new(t).color(if *ok { GOOD } else { BAD }));
-                    ui.ctx().request_repaint_after(Duration::from_millis(300));
-                }
-            }
-        }
-        match self.tab {
-            Tab::Screen => self.screen(ui),
-            Tab::Stats => self.stats(ui),
-            Tab::Control => self.control(ui),
         }
     }
 
@@ -633,52 +636,545 @@ impl App {
         }
     }
 
-    fn screen(&mut self, ui: &mut Ui) {
-        let touchpad = self.store.touchpad;
-        let Some(l) = &mut self.live else { return };
-        let Some(tex) = &l.texture else {
-            card(ui, |ui| {
+    // ------------------------------------------------------------------ home
+
+    fn fab(&mut self, ctx: &egui::Context, bottom: f32, right: f32) {
+        let p = pal();
+        egui::Area::new(egui::Id::unique("fab")).order(egui::Order::Foreground).anchor(Align2::RIGHT_BOTTOM, vec2(-right, -bottom)).show(ctx, |ui| {
+            let (rect, resp) = ui.allocate_exact_size(vec2(132.0, 56.0), Sense::click());
+            ui.painter().rect_filled(rect.translate(vec2(0.0, 2.0)), 18.0, Color32::from_black_alpha(if p.dark { 60 } else { 25 }));
+            ui.painter().rect_filled(rect, 18.0, p.container);
+            ui::icon_at(ui, Pos2::new(rect.left() + 30.0, rect.center().y), ic::PLUS, 22.0, p.on_container, false);
+            ui.painter().text(Pos2::new(rect.left() + 48.0, rect.center().y), Align2::LEFT_CENTER, "Add PC", medium(15.0), p.on_container);
+            if tap(&resp) {
+                self.page = Page::Add;
+                self.pair_error = None;
+                self.scan();
+            }
+        });
+    }
+
+    fn home(&mut self, ui: &mut Ui) {
+        let p = pal();
+        self.probe();
+        ui.ctx().request_repaint_after(Duration::from_secs(2));
+        ui.horizontal(|ui| {
+            ui.set_min_height(64.0);
+            ui.vertical(|ui| {
+                ui.spacing_mut().item_spacing.y = 0.0;
+                ui.add_space(8.0);
+                ui.label(RichText::new("Oxide Remote").font(semibold(28.0)).color(p.text));
+                ui.label(RichText::new("Your computers").size(15.0).color(p.muted));
+            });
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if tap(&ui::icon_button(ui, ic::GEAR, p.text, None)) {
+                    self.page = Page::Settings;
+                }
+            });
+        });
+        ui.add_space(10.0);
+        let online = self.online.lock().unwrap().clone();
+        let mut open = None;
+        let mut wake = None;
+        egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
+            // a new version of the app
+            if let Some((v, url)) = self.update.latest.clone() {
+                let (state, prog) = platform::update_status();
+                egui::Frame::new().fill(p.container).corner_radius(r(24)).inner_margin(egui::Margin::same(16)).show(ui, |ui| {
+                    ui.set_width(ui.available_width());
+                    ui.horizontal(|ui| {
+                        ui::icon(ui, ic::UPDATE, 24.0, p.on_container);
+                        ui.vertical(|ui| {
+                            ui.spacing_mut().item_spacing.y = 0.0;
+                            ui.label(RichText::new(format!("Version {v} is available")).font(medium(16.0)).color(p.on_container));
+                            ui.label(RichText::new(match state {
+                                1 => format!("Downloading… {prog}%"),
+                                2 => "Confirm the update on the next screen".into(),
+                                3 => platform::update_error(),
+                                _ => format!("You have {VERSION}"),
+                            }).size(13.5).color(p.on_container.gamma_multiply(0.8)));
+                        });
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            if state == 1 {
+                                ui::spinner(ui, 22.0);
+                            } else if tap(&ui::button(ui, Kind::Filled, None, "Update", 0.0)) {
+                                platform::install_update(&url);
+                            }
+                        });
+                    });
+                });
+                ui.add_space(12.0);
+                if state == 1 || state == 2 {
+                    ui.ctx().request_repaint_after(Duration::from_millis(250));
+                }
+            }
+            if self.store.pcs.is_empty() {
+                ui::empty_state(ui, ic::MONITOR, "No PCs yet", "Pair one: it takes a minute.", p.accent);
+                ui.vertical_centered(|ui| {
+                    if tap(&ui::button(ui, Kind::Filled, Some(ic::PLUS), "Add a PC", 0.0)) {
+                        self.page = Page::Add;
+                        self.scan();
+                    }
+                });
+            }
+            for (i, pc) in self.store.pcs.clone().iter().enumerate() {
+                let state = online.get(&pc.id).copied();
+                let (status, color) = match state {
+                    Some(Some(Route::Home)) => ("Online · home network".to_string(), p.good),
+                    Some(Some(Route::Away)) => ("Online · over the internet".to_string(), p.good),
+                    Some(None) => ("Offline".to_string(), p.muted),
+                    None => ("Checking…".to_string(), p.line),
+                };
+                let resp = ui::tap_card(ui, egui::Id::unique(("pc", &pc.id)), |ui| {
+                    ui.horizontal(|ui| {
+                        let (tile, _) = ui.allocate_exact_size(vec2(52.0, 52.0), Sense::hover());
+                        let on = matches!(state, Some(Some(_)));
+                        ui.painter().circle_filled(tile.center(), 26.0, if on { p.container } else { p.raised });
+                        ui::icon_at(ui, tile.center(), ic::MONITOR, 26.0, if on { p.on_container } else { p.muted }, on);
+                        ui.add_space(4.0);
+                        ui.vertical(|ui| {
+                            ui.spacing_mut().item_spacing.y = 2.0;
+                            ui.add_space(4.0);
+                            ui.label(RichText::new(&pc.name).font(semibold(18.0)).color(p.text));
+                            ui.horizontal(|ui| {
+                                ui.spacing_mut().item_spacing.x = 6.0;
+                                let (d, _) = ui.allocate_exact_size(vec2(8.0, 16.0), Sense::hover());
+                                ui.painter().circle_filled(d.center(), 4.0, color);
+                                ui.label(RichText::new(&status).size(13.5).color(p.muted));
+                            });
+                        });
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            if tap(&ui::icon_button(ui, ic::DOTS, p.muted, None)) {
+                                self.sheet = Some(i);
+                            }
+                        });
+                    });
+                    ui.add_space(12.0);
+                    ui.horizontal(|ui| {
+                        match state {
+                            Some(Some(_)) => {
+                                if tap(&ui::button(ui, Kind::Filled, Some(ic::MONITOR), "Connect", 0.0)) {
+                                    open = Some(i);
+                                }
+                            }
+                            _ => {
+                                if !pc.macs.is_empty() && tap(&ui::button(ui, Kind::Tonal, Some(ic::LIGHTNING), "Wake up", 0.0)) {
+                                    wake = Some(i);
+                                }
+                                if tap(&ui::button(ui, Kind::Text, None, "Try anyway", 0.0)) {
+                                    open = Some(i);
+                                }
+                            }
+                        }
+                    });
+                });
+                if tap(&resp) && matches!(state, Some(Some(_))) {
+                    open = Some(i);
+                }
+                ui.add_space(12.0);
+            }
+            ui.add_space(96.0);
+        });
+        if let Some(i) = wake {
+            self.wake(i);
+        }
+        if let Some(i) = open {
+            self.open_pc(i);
+        }
+    }
+
+    /// The actions of one PC, as a sheet from the bottom.
+    fn pc_sheet(&mut self, ctx: &egui::Context, i: usize) {
+        let p = pal();
+        let Some(pc) = self.store.pcs.get(i).cloned() else {
+            self.sheet = None;
+            return;
+        };
+        let screen = ctx.content_rect();
+        let mut close = false;
+        egui::Area::new(egui::Id::unique("sheet-scrim")).order(egui::Order::Foreground).fixed_pos(screen.min).show(ctx, |ui| {
+            let (rect, resp) = ui.allocate_exact_size(screen.size(), Sense::click());
+            ui.painter().rect_filled(rect, 0.0, Color32::from_black_alpha(110));
+            close |= resp.clicked();
+        });
+        let bottom = self.insets[1];
+        let mut action = None;
+        egui::Area::new(egui::Id::unique("sheet")).order(egui::Order::Tooltip).anchor(Align2::CENTER_BOTTOM, Vec2::ZERO).show(ctx, |ui| {
+            egui::Frame::new()
+                .fill(mix(p.card, p.raised, 0.3))
+                .corner_radius(egui::CornerRadius { nw: 28, ne: 28, sw: 0, se: 0 })
+                .inner_margin(egui::Margin { left: 20, right: 20, top: 12, bottom: 20 + bottom as i8 })
+                .show(ui, |ui| {
+                    ui.set_width(screen.width() - 40.0);
+                    ui.vertical_centered(|ui| {
+                        let (h, _) = ui.allocate_exact_size(vec2(36.0, 4.0), Sense::hover());
+                        ui.painter().rect_filled(h, 2.0, p.line);
+                    });
+                    ui.add_space(8.0);
+                    ui.label(RichText::new(&pc.name).font(semibold(20.0)).color(p.text));
+                    let away = if pc.remote.is_empty() { "only at home".to_string() } else { format!("also away ({})", pc.remote.len()) };
+                    ui.label(RichText::new(format!("{}  ·  {away}", pc.host)).size(13.5).color(p.muted));
+                    ui.add_space(8.0);
+                    let mut item = |ui: &mut Ui, glyph: &str, text: &str, color: Color32, a: u8| {
+                        let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), 52.0), Sense::click());
+                        if resp.is_pointer_button_down_on() {
+                            ui.painter().rect_filled(rect, 14.0, p.text.gamma_multiply(0.08));
+                        }
+                        ui::icon_at(ui, Pos2::new(rect.left() + 20.0, rect.center().y), glyph, 22.0, color, false);
+                        ui.painter().text(Pos2::new(rect.left() + 48.0, rect.center().y), Align2::LEFT_CENTER, text, medium(16.0), color);
+                        if tap(&resp) {
+                            action = Some(a);
+                        }
+                    };
+                    item(ui, ic::MONITOR, "Connect", p.text, 0);
+                    if !pc.macs.is_empty() {
+                        item(ui, ic::LIGHTNING, "Wake up", p.text, 1);
+                    }
+                    item(ui, ic::TRASH, "Forget this PC", p.bad, 2);
+                });
+        });
+        match action {
+            Some(0) => {
+                self.sheet = None;
+                self.open_pc(i);
+            }
+            Some(1) => {
+                self.sheet = None;
+                self.wake(i);
+            }
+            Some(2) => {
+                self.sheet = None;
+                self.confirm = Some(Confirm::Forget(i));
+            }
+            _ if close => self.sheet = None,
+            _ => {}
+        }
+    }
+
+    // ------------------------------------------------------------------ add a PC
+
+    fn add(&mut self, ui: &mut Ui) {
+        let p = pal();
+        let can_back = !self.store.pcs.is_empty();
+        if ui::top_bar(ui, can_back, "Add a PC", None, |_| {}) {
+            self.page = Page::Home;
+            self.pairing = None;
+            return;
+        }
+        egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
+            // the code
+            if let Some(pr) = &mut self.pairing {
+                let mut cancel = false;
+                ui::card(ui, |ui| match pr.pc_name.clone() {
+                    None => {
+                        ui.horizontal(|ui| {
+                            ui::spinner(ui, 22.0);
+                            ui.label(RichText::new(format!("Contacting {}…", pr.host)).size(16.0).color(p.text));
+                        });
+                    }
+                    Some(name) => {
+                        ui.vertical_centered(|ui| {
+                            ui.add_space(4.0);
+                            ui.label(RichText::new("Enter the code").font(semibold(22.0)).color(p.text));
+                            ui.label(RichText::new(format!("{name} shows it in Settings → Phone")).size(14.5).color(p.muted));
+                        });
+                        ui.add_space(16.0);
+                        let ready = ui::code_boxes(ui, &mut pr.code);
+                        ui.add_space(16.0);
+                        if pr.sent {
+                            ui.vertical_centered(|ui| {
+                                ui.horizontal(|ui| {
+                                    ui::spinner(ui, 20.0);
+                                    ui.label(RichText::new("Checking…").color(p.muted));
+                                });
+                            });
+                        } else {
+                            let w = ui.available_width();
+                            ui.add_enabled_ui(ready, |ui| ui::button(ui, Kind::Filled, Some(ic::CHECK), "Pair", w));
+                            // the sixth digit sends the code
+                            if ready {
+                                let _ = pr.code_tx.send(pr.code.clone());
+                                pr.sent = true;
+                            }
+                        }
+                    }
+                });
+                ui.add_space(8.0);
+                ui.vertical_centered(|ui| {
+                    if tap(&ui::button(ui, Kind::Text, None, "Cancel", 0.0)) {
+                        cancel = true;
+                    }
+                });
+                if cancel {
+                    self.pairing = None;
+                }
+                return;
+            }
+            if let Some(e) = self.pair_error.clone() {
+                egui::Frame::new().fill(mix(p.card, p.bad, 0.14)).corner_radius(r(20)).inner_margin(egui::Margin::same(16)).show(ui, |ui| {
+                    ui.set_width(ui.available_width());
+                    ui.horizontal(|ui| {
+                        ui::icon(ui, ic::WARNING, 22.0, p.bad);
+                        ui.add(egui::Label::new(RichText::new(e).size(15.0).color(p.text)).wrap());
+                    });
+                });
+                ui.add_space(10.0);
+            }
+            ui::card(ui, |ui| {
+                for (n, t) in [(1, "On the PC, open Settings → Phone and switch on \"Let my phone connect\"."), (2, "Press \"Pair a phone\" there, then pick the PC below.")] {
+                    ui.horizontal(|ui| {
+                        let (c, _) = ui.allocate_exact_size(vec2(30.0, 30.0), Sense::hover());
+                        ui.painter().circle_filled(c.center(), 15.0, p.container);
+                        ui.painter().text(c.center(), Align2::CENTER_CENTER, n.to_string(), medium(15.0), p.on_container);
+                        ui.add(egui::Label::new(RichText::new(t).size(15.0).color(p.text)).wrap());
+                    });
+                    if n == 1 {
+                        ui.add_space(6.0);
+                    }
+                }
+            });
+            let mut start: Option<(String, u16)> = None;
+            ui::section(ui, "On this network");
+            ui::card(ui, |ui| {
+                for (k, (a, host)) in self.found.clone().into_iter().enumerate() {
+                    let paired = self.store.pcs.iter().any(|p| p.id == a.id);
+                    ui::row(ui, ic::MONITOR, &a.name, &host, |ui| {
+                        if tap(&ui::button(ui, Kind::Tonal, None, if paired { "Pair again" } else { "Pair" }, 0.0)) {
+                            start = Some((host.clone(), a.port));
+                        }
+                    });
+                    if k + 1 < self.found.len() {
+                        ui.add_space(4.0);
+                    }
+                }
+                if self.scanning.is_some() {
+                    ui.horizontal(|ui| {
+                        ui::spinner(ui, 20.0);
+                        ui.label(RichText::new("Looking for PCs…").color(p.muted));
+                    });
+                } else {
+                    if self.found.is_empty() {
+                        ui.label(RichText::new("No PC found. Is \"Let my phone connect\" on, and is the phone on the same Wi-Fi?").size(14.5).color(p.muted));
+                    }
+                    ui.add_space(4.0);
+                    if tap(&ui::button(ui, Kind::Text, Some(ic::REFRESH), "Search again", 0.0)) {
+                        self.scan();
+                    }
+                }
+            });
+            ui::section(ui, "Or by address");
+            ui::card(ui, |ui| {
+                let w = ui.available_width() - 96.0;
                 ui.horizontal(|ui| {
-                    ui.spinner();
-                    ui.label(RichText::new("Waiting for the screen…").color(MUTED));
+                    ui::field(ui, &mut self.manual_host, "192.168.1.20", w);
+                    if tap(&ui::button(ui, Kind::Filled, None, "Pair", 86.0)) && !self.manual_host.trim().is_empty() {
+                        let (h, port) = match self.manual_host.trim().rsplit_once(':') {
+                            Some((h, p)) if p.parse::<u16>().is_ok() => (h.to_string(), p.parse().unwrap()),
+                            _ => (self.manual_host.trim().to_string(), oxide_remote_proto::TCP_PORT),
+                        };
+                        start = Some((h, port));
+                    }
+                });
+            });
+            if let Some((host, port)) = start {
+                let (events, code_tx) = net::pair(host.clone(), port, self.store.phone_id.clone(), self.store.phone_name.clone());
+                self.pairing = Some(Pairing { host, events, code_tx, pc_name: None, code: String::new(), sent: false });
+                self.pair_error = None;
+            }
+            ui.add_space(24.0);
+        });
+    }
+
+    // ------------------------------------------------------------------ settings
+
+    fn settings(&mut self, ui: &mut Ui) {
+        let p = pal();
+        if ui::top_bar(ui, true, "Settings", None, |_| {}) {
+            self.page = Page::Home;
+            return;
+        }
+        egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
+            ui::section(ui, "Look");
+            ui::card(ui, |ui| {
+                ui.label(RichText::new("Colors").font(medium(16.0)).color(p.text));
+                ui.label(RichText::new(match self.store.theme.as_str() {
+                    "pc" => "The colors of your PC's Oxide theme.",
+                    "oxide" => "Oxide's own colors, dark or light like the phone.",
+                    _ => "Your phone's colors and its dark or light mode.",
+                }).size(13.5).color(p.muted));
+                ui.add_space(8.0);
+                let mut sel = match self.store.theme.as_str() {
+                    "pc" => 1,
+                    "oxide" => 2,
+                    _ => 0,
+                };
+                if ui::segmented(ui, &[(ic::PHONE, "Phone"), (ic::MONITOR, "My PC"), (ic::GRID, "Oxide")], &mut sel) {
+                    self.store.theme = ["phone", "pc", "oxide"][sel].into();
+                    self.store.save();
+                    self.refresh_theme();
+                }
+            });
+            ui::section(ui, "Screen");
+            ui::card(ui, |ui| {
+                ui.label(RichText::new("Picture").font(medium(16.0)).color(p.text));
+                ui.label(RichText::new("Smooth uses less data; sharp shows small text better.").size(13.5).color(p.muted));
+                ui.add_space(8.0);
+                let mut q = match self.store.quality {
+                    0..=49 => 0,
+                    50..=69 => 1,
+                    _ => 2,
+                };
+                if ui::segmented(ui, &[(ic::WAVE, "Smooth"), (ic::GAUGE, "Balanced"), (ic::SEARCH, "Sharp")], &mut q) {
+                    self.store.quality = [40, 60, 80][q];
+                    self.store.save();
+                }
+                ui.add_space(14.0);
+                ui.label(RichText::new("Touch").font(medium(16.0)).color(p.text));
+                ui.label(RichText::new("Touchpad moves the pointer like a laptop's; Tap clicks where you touch.").size(13.5).color(p.muted));
+                ui.add_space(8.0);
+                let mut t = if self.store.touchpad { 0 } else { 1 };
+                if ui::segmented(ui, &[(ic::MOUSE, "Touchpad"), (ic::TAP, "Tap")], &mut t) {
+                    self.store.touchpad = t == 0;
+                    self.store.save();
+                }
+            });
+            ui::section(ui, "Updates");
+            ui::card(ui, |ui| {
+                let (state, prog) = platform::update_status();
+                let checking = self.update.rx.is_some();
+                let sub = if checking {
+                    "Checking…".to_string()
+                } else if let Some((v, _)) = &self.update.latest {
+                    match state {
+                        1 => format!("Downloading {v}… {prog}%"),
+                        2 => "Confirm the update on the next screen".into(),
+                        3 => platform::update_error(),
+                        _ => format!("Version {v} is available"),
+                    }
+                } else if let Some(e) = &self.update.error {
+                    e.clone()
+                } else if self.update.checked {
+                    "You have the newest version".into()
+                } else {
+                    String::new()
+                };
+                let latest = self.update.latest.clone();
+                ui::row(ui, ic::UPDATE, &format!("Oxide Remote {VERSION}"), &sub, |ui| {
+                    if checking || state == 1 {
+                        ui::spinner(ui, 22.0);
+                    } else if let Some((_, url)) = &latest {
+                        if tap(&ui::button(ui, Kind::Filled, None, "Update", 0.0)) {
+                            platform::install_update(url);
+                        }
+                    } else if tap(&ui::button(ui, Kind::Tonal, None, "Check", 0.0)) {
+                        self.check_update();
+                    }
+                });
+                if state == 1 || state == 2 || checking {
+                    ui.ctx().request_repaint_after(Duration::from_millis(250));
+                }
+            });
+            ui::section(ui, "About");
+            ui::card(ui, |ui| {
+                ui::row(ui, ic::GLOBE, "Source code", "github.com/veelvoer/oxide", |ui| {
+                    if tap(&ui::icon_button(ui, ic::OPEN, p.accent, None)) {
+                        platform::open_url(SOURCE);
+                    }
+                });
+                ui.add_space(4.0);
+                ui::row(ui, ic::PHONE, "This phone", &format!("Seen by your PCs as \"{}\"", self.store.phone_name), |_| {});
+            });
+            ui.add_space(24.0);
+        });
+    }
+
+    // ------------------------------------------------------------------ a PC
+
+    fn pc(&mut self, ui: &mut Ui, i: usize) {
+        let p = pal();
+        let name = self.store.pcs.get(i).map(|p| p.name.clone()).unwrap_or_default();
+        let (status, color) = match &self.live {
+            Some(l) if l.connected.is_some() => (
+                match l.route {
+                    Some(Route::Away) => "Connected over the internet",
+                    _ => "Connected",
+                }
+                .to_string(),
+                p.good,
+            ),
+            Some(l) if l.error.is_some() => ("Not connected".to_string(), p.bad),
+            _ => ("Connecting…".to_string(), p.warn),
+        };
+        let can_full = self.tab == Tab::Screen && self.live.as_ref().is_some_and(|l| l.texture.is_some());
+        let mut go_full = false;
+        if ui::top_bar(ui, true, &name, Some((&status, color)), |ui| {
+            if can_full && tap(&ui::icon_button(ui, ic::EXPAND, p.text, None)) {
+                go_full = true;
+            }
+        }) {
+            self.close_pc();
+            return;
+        }
+        if go_full {
+            self.enter_full();
+        }
+        if let Some(e) = self.live.as_ref().and_then(|l| l.error.clone()) {
+            ui.add_space(20.0);
+            ui::empty_state(ui, ic::WARNING, "Lost the connection", &e, p.bad);
+            ui.vertical_centered(|ui| {
+                ui.horizontal(|ui| {
+                    let has_mac = self.store.pcs.get(i).is_some_and(|p| !p.macs.is_empty());
+                    let w: f32 = if has_mac { 140.0 } else { 0.0 };
+                    ui.add_space(((ui.available_width() - if has_mac { 292.0 } else { 140.0 }) / 2.0).max(0.0));
+                    if tap(&ui::button(ui, Kind::Filled, Some(ic::REFRESH), "Try again", w.max(140.0))) {
+                        self.open_pc(i);
+                    }
+                    if has_mac && tap(&ui::button(ui, Kind::Tonal, Some(ic::LIGHTNING), "Wake up", 140.0)) {
+                        self.wake(i);
+                    }
                 });
             });
             return;
-        };
-        let size = tex.size_vec2();
-        let avail = ui.available_width();
-        let h = (avail * size.y / size.x).min(ui.available_height() - 180.0).max(120.0);
-        let w = h * size.x / size.y;
-        let (rect, resp) = ui.allocate_exact_size(vec2(avail, h), Sense::click_and_drag());
-        let img_rect = egui::Rect::from_center_size(rect.center(), vec2(w, h));
-        ui.painter().rect_filled(rect, r(12), DEEP);
-        ui.painter().image(tex.id(), img_rect, egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)), Color32::WHITE);
-        let tx = l.session.to_pc.clone();
+        }
+        match self.tab {
+            Tab::Screen => self.screen(ui),
+            Tab::Stats => self.stats(ui),
+            Tab::Control => self.control(ui),
+        }
+    }
+
+    /// Touch on the picture of the screen → pointer, clicks and scrolling on the PC.
+    fn screen_input(&self, ui: &Ui, resp: &egui::Response, img: Rect, touchpad: bool, two_finger_scroll: bool) {
+        let Some(l) = &self.live else { return };
+        let tx = &l.session.to_pc;
         let full = l.full;
-        // touch → mouse
-        let (multi, zoom_scroll) = ui.input(|i| (i.multi_touch(), i.smooth_scroll_delta));
+        let (multi, wheel) = ui.input(|i| (i.multi_touch(), i.smooth_scroll_delta));
         if let Some(mt) = multi {
-            // two fingers: scroll
-            if mt.translation_delta.y.abs() > 0.5 {
+            if two_finger_scroll && mt.translation_delta.y.abs() > 0.5 {
                 let _ = tx.send(ToPc::Scroll { dx: 0.0, dy: (-mt.translation_delta.y * 0.6) as f64 });
             }
-        } else if zoom_scroll.y.abs() > 0.5 && resp.hovered() {
-            let _ = tx.send(ToPc::Scroll { dx: 0.0, dy: (-zoom_scroll.y * 0.4) as f64 });
-        } else if touchpad {
+            return;
+        }
+        if wheel.y.abs() > 0.5 && resp.hovered() {
+            let _ = tx.send(ToPc::Scroll { dx: 0.0, dy: (-wheel.y * 0.4) as f64 });
+        }
+        if touchpad {
             if resp.dragged() {
                 let d = resp.drag_delta();
-                let k = full.0 as f32 / w.max(1.0) * 0.9;
+                let k = full.0 as f32 / img.width().max(1.0) * 0.9;
                 let _ = tx.send(ToPc::PointerBy { dx: (d.x * k) as f64, dy: (d.y * k) as f64 });
             }
             if resp.clicked() {
+                platform::haptic(0);
                 let _ = tx.send(ToPc::Click { button: "left".into() });
             }
             if resp.secondary_clicked() || resp.long_touched() {
+                platform::haptic(1);
                 let _ = tx.send(ToPc::Click { button: "right".into() });
             }
-        } else if let Some(p) = resp.interact_pointer_pos() {
-            let fx = ((p.x - img_rect.left()) / img_rect.width()) as f64;
-            let fy = ((p.y - img_rect.top()) / img_rect.height()) as f64;
+        } else if let Some(pt) = resp.interact_pointer_pos() {
+            let fx = ((pt.x - img.left()) / img.width()) as f64;
+            let fy = ((pt.y - img.top()) / img.height()) as f64;
             if resp.drag_started() {
                 let _ = tx.send(ToPc::PointerTo { x: fx, y: fy });
                 let _ = tx.send(ToPc::ButtonState { button: "left".into(), pressed: true });
@@ -688,292 +1184,545 @@ impl App {
                 let _ = tx.send(ToPc::ButtonState { button: "left".into(), pressed: false });
             }
             if resp.clicked() {
+                platform::haptic(0);
                 let _ = tx.send(ToPc::PointerTo { x: fx, y: fy });
                 let _ = tx.send(ToPc::Click { button: "left".into() });
             }
             if resp.long_touched() || resp.secondary_clicked() {
+                platform::haptic(1);
                 let _ = tx.send(ToPc::PointerTo { x: fx, y: fy });
                 let _ = tx.send(ToPc::Click { button: "right".into() });
             }
         }
-        ui.label(RichText::new(format!("{}×{}  ·  {:.0} fps  ·  {:.1} Mb/s", full.0, full.1, l.fps, l.kbps / 1000.0)).color(MUTED).size(12.0));
-        // mode and quality
-        ui.horizontal(|ui| {
-            let mut tp = touchpad;
-            if ui.selectable_label(tp, "Touchpad").clicked() {
-                tp = true;
-            }
-            if ui.selectable_label(!tp, "Tap to click").clicked() {
-                tp = false;
-            }
-            if tp != touchpad {
-                self.store.touchpad = tp;
-                self.store.save();
-            }
+    }
+
+    fn keys(&self, ui: &mut Ui) {
+        egui::ScrollArea::horizontal().id_salt("keys").show(ui, |ui| {
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = 8.0;
+                let keys: [(Option<&str>, &str, &str, &[&str]); 12] = [
+                    (None, "Esc", "Escape", &[]),
+                    (None, "Tab", "Tab", &[]),
+                    (Some(ic::ENTER), "", "Return", &[]),
+                    (Some(ic::BACKSPACE), "", "BackSpace", &[]),
+                    (Some(ic::LEFT_ARROW), "", "Left", &[]),
+                    (Some(ic::UP), "", "Up", &[]),
+                    (Some(ic::DOWN), "", "Down", &[]),
+                    (Some(ic::RIGHT), "", "Right", &[]),
+                    (Some(ic::COMMAND), "Super", "Super_L", &[]),
+                    (None, "Alt+Tab", "Tab", &["alt"]),
+                    (None, "Ctrl+C", "c", &["ctrl"]),
+                    (None, "Ctrl+V", "v", &["ctrl"]),
+                ];
+                for (g, lab, key, mods) in keys {
+                    if tap(&ui::chip(ui, g, lab, false)) {
+                        self.send(ToPc::Key { name: key.into(), mods: mods.iter().map(|m| m.to_string()).collect() });
+                    }
+                }
+            });
         });
+    }
+
+    fn screen(&mut self, ui: &mut Ui) {
+        let p = pal();
+        let touchpad = self.store.touchpad;
+        let Some(l) = &self.live else { return };
+        let Some(tex) = l.texture.clone() else {
+            ui.add_space(40.0);
+            ui.vertical_centered(|ui| {
+                ui::spinner(ui, 36.0);
+                ui.add_space(10.0);
+                ui.label(RichText::new(if l.connected.is_some() { "Waiting for the screen…" } else { "Connecting…" }).size(16.0).color(p.muted));
+            });
+            return;
+        };
+        let (full, fps, kbps, route) = (l.full, l.fps, l.kbps, l.route);
+        let size = tex.size_vec2();
+        let avail = ui.available_width();
+        let h = (avail * size.y / size.x).min(ui.available_height() - 210.0).max(140.0);
+        let w = (h * size.x / size.y).min(avail);
+        let h = w * size.y / size.x;
+        let (rect, resp) = ui.allocate_exact_size(vec2(avail, h + 8.0), Sense::click_and_drag());
+        let img = Rect::from_center_size(rect.center(), vec2(w, h));
+        ui.painter().rect_filled(rect, 20.0, p.deep);
+        egui::Image::from_texture(egui::load::SizedTexture::new(tex.id(), size)).corner_radius(14).paint_at(ui, img);
+        self.screen_input(ui, &resp, img, touchpad, true);
+        // full screen, over the picture
+        let fs = Rect::from_center_size(Pos2::new(rect.right() - 30.0, rect.bottom() - 30.0), vec2(40.0, 40.0));
+        let fs_resp = ui.interact(fs, ui.scope_id().with("fs"), Sense::click());
+        ui.painter().circle_filled(fs.center(), 20.0, Color32::from_black_alpha(130));
+        ui::icon_at(ui, fs.center(), ic::EXPAND, 20.0, Color32::WHITE, false);
+        if tap(&fs_resp) {
+            self.enter_full();
+        }
+        ui.add_space(2.0);
+        ui.label(
+            RichText::new(format!(
+                "{}×{}  ·  {:.0} fps  ·  {:.1} Mb/s{}",
+                full.0,
+                full.1,
+                fps,
+                kbps / 1000.0,
+                if route == Some(Route::Away) { "  ·  over the internet" } else { "" }
+            ))
+            .size(12.5)
+            .color(p.muted),
+        );
+        ui.add_space(4.0);
+        let mut t = if touchpad { 0 } else { 1 };
+        if ui::segmented(ui, &[(ic::MOUSE, "Touchpad"), (ic::TAP, "Tap to click")], &mut t) {
+            self.store.touchpad = t == 0;
+            self.store.save();
+        }
+        ui.add_space(4.0);
+        self.keys(ui);
         let Some(l) = &mut self.live else { return };
-        // keyboard
+        let mut send = None;
         ui.horizontal(|ui| {
-            let resp = ui.add(egui::TextEdit::singleline(&mut l.text).hint_text("Type on the PC…").desired_width(ui.available_width() - 80.0));
-            let enter = resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
-            if (primary(ui, "Send").clicked() || enter) && !l.text.is_empty() {
-                let _ = l.session.to_pc.send(ToPc::Text { text: std::mem::take(&mut l.text) });
-                if enter {
-                    let _ = l.session.to_pc.send(ToPc::Key { name: "Return".into(), mods: vec![] });
-                }
+            let w = ui.available_width() - 58.0;
+            let r = ui::field(ui, &mut l.text, "Type on the PC…", w);
+            let enter = r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+            if (tap(&ui::icon_button(ui, ic::SEND, p.on_accent, Some(p.accent))) || enter) && !l.text.is_empty() {
+                send = Some((std::mem::take(&mut l.text), enter));
             }
         });
-        ui.horizontal_wrapped(|ui| {
-            for (lab, key, mods) in [("Esc", "Escape", &[][..]), ("Tab", "Tab", &[]), ("Enter", "Return", &[]), ("Del", "BackSpace", &[]), ("←", "Left", &[]), ("→", "Right", &[]), ("↑", "Up", &[]), ("↓", "Down", &[]), ("Super", "Super_L", &[]), ("Alt+Tab", "Tab", &["alt"][..])] {
-                if ui.add(egui::Button::new(RichText::new(lab).monospace()).min_size(vec2(52.0, 40.0))).clicked() {
-                    let _ = l.session.to_pc.send(ToPc::Key { name: key.into(), mods: mods.iter().map(|m| m.to_string()).collect() });
+        if let Some((text, enter)) = send {
+            self.send(ToPc::Text { text });
+            if enter {
+                self.send(ToPc::Key { name: "Return".into(), mods: vec![] });
+            }
+        }
+        ui.ctx().request_repaint_after(Duration::from_millis(500));
+    }
+
+    /// The PC's screen on the whole phone: pinch to zoom, a toolbar at the top that hides itself.
+    fn fullscreen(&mut self, ui: &mut Ui, screen: Rect) {
+        let touchpad = self.store.touchpad;
+        let Some(tex) = self.live.as_ref().and_then(|l| l.texture.clone()) else { return };
+        ui.painter().rect_filled(screen, 0.0, Color32::BLACK);
+        let size = tex.size_vec2();
+        let fit = (screen.width() / size.x).min(screen.height() / size.y);
+        let (zoom, pan) = self.full.as_ref().map(|f| (f.zoom, f.pan)).unwrap_or((1.0, Vec2::ZERO));
+        let img = Rect::from_center_size(screen.center() + pan, size * fit * zoom);
+        let resp = ui.interact(screen, ui.scope_id().with("full-screen"), Sense::click_and_drag());
+        ui.painter_at(screen).image(tex.id(), img, Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)), Color32::WHITE);
+        // pinch: zoom around the fingers; two fingers while zoomed: move the picture
+        let multi = ui.input(|i| i.multi_touch());
+        let mut scroll_pc = true;
+        if let (Some(mt), Some(f)) = (multi, self.full.as_mut()) {
+            let z = (f.zoom * mt.zoom_delta).clamp(1.0, 5.0);
+            if (z - f.zoom).abs() > 0.001 {
+                let c = mt.center_pos - screen.center() - f.pan;
+                f.pan -= c * (z / f.zoom - 1.0);
+                f.zoom = z;
+            }
+            if f.zoom > 1.01 {
+                f.pan += mt.translation_delta;
+                scroll_pc = false;
+            }
+            let max = (size * fit * f.zoom - screen.size()).max(Vec2::ZERO) / 2.0;
+            f.pan = f.pan.clamp(-max, max);
+            if f.zoom <= 1.01 {
+                f.pan = Vec2::ZERO;
+            }
+        }
+        self.screen_input(ui, &resp, img, touchpad, scroll_pc);
+
+        // toolbar: shown for a moment, and again when the handle at the top is touched
+        let p = pal();
+        let now = Instant::now();
+        let shown = self.full.as_ref().is_some_and(|f| now < f.bar_until || f.typing);
+        let t = ui.ctx().animate_bool_with_time(egui::Id::unique("full-bar"), shown, 0.2);
+        let handle = Rect::from_center_size(Pos2::new(screen.center().x, screen.top() + 14.0), vec2(120.0, 28.0));
+        let h_resp = ui.interact(handle, ui.scope_id().with("full-handle"), Sense::click());
+        ui.painter().rect_filled(Rect::from_center_size(Pos2::new(handle.center().x, screen.top() + 8.0), vec2(48.0, 5.0)), 3.0, Color32::from_white_alpha((90.0 * (1.0 - t)) as u8));
+        if h_resp.clicked() {
+            if let Some(f) = self.full.as_mut() {
+                f.bar_until = now + Duration::from_secs(4);
+            }
+        }
+        let mut exit = false;
+        let mut toggle_typing = false;
+        let mut toggle_mode = false;
+        let mut key: Option<(&str, &[&str])> = None;
+        if t > 0.01 {
+            let bar_w = 360.0f32.min(screen.width() - 24.0);
+            let bar = Rect::from_center_size(Pos2::new(screen.center().x, screen.top() + 40.0 - (1.0 - t) * 50.0), vec2(bar_w, 56.0));
+            let painter = ui.painter();
+            painter.rect_filled(bar, 28.0, Color32::from_rgba_unmultiplied(18, 18, 22, (242.0 * t) as u8));
+            let items: [(&str, u8); 6] = [(ic::SHRINK, 0), (ic::KEYBOARD, 1), (if touchpad { ic::MOUSE } else { ic::TAP }, 2), (ic::COMMAND, 3), (ic::TABS, 4), (ic::CLOSE, 5)];
+            let w = bar.width() / items.len() as f32;
+            for (k, (g, a)) in items.iter().enumerate() {
+                let cell = Rect::from_min_size(Pos2::new(bar.left() + w * k as f32, bar.top()), vec2(w, bar.height()));
+                let r = ui.interact(cell, ui.scope_id().with(("full-bar", k)), Sense::click());
+                let active = (*a == 1 && self.full.as_ref().is_some_and(|f| f.typing)) || (*a == 2 && !touchpad);
+                if active {
+                    ui.painter().circle_filled(cell.center(), 20.0, p.accent.gamma_multiply(t));
+                }
+                let label = match a {
+                    5 => "Esc",
+                    _ => "",
+                };
+                if label.is_empty() {
+                    ui::icon_at(ui, cell.center(), g, 22.0, if active { p.on_accent } else { Color32::WHITE.gamma_multiply(t) }, false);
+                } else {
+                    ui.painter().text(cell.center(), Align2::CENTER_CENTER, label, medium(15.0), Color32::WHITE.gamma_multiply(t));
+                }
+                if tap(&r) {
+                    if let Some(f) = self.full.as_mut() {
+                        f.bar_until = now + Duration::from_secs(4);
+                    }
+                    match a {
+                        0 => exit = true,
+                        1 => toggle_typing = true,
+                        2 => toggle_mode = true,
+                        3 => key = Some(("Super_L", &[])),
+                        4 => key = Some(("Tab", &["alt"])),
+                        _ => key = Some(("Escape", &[])),
+                    }
                 }
             }
-        });
+            ui.ctx().request_repaint_after(Duration::from_millis(250));
+        }
+        // typing bar above the keyboard
+        let mut send = None;
+        if let Some(f) = self.full.as_mut() {
+            if f.typing {
+                let kb = self.insets[4];
+                let bar = Rect::from_min_size(Pos2::new(screen.left() + 12.0, screen.bottom() - kb - 68.0), vec2(screen.width() - 24.0, 56.0));
+                let mut child = ui.new_child(egui::UiBuilder::new().max_rect(bar));
+                egui::Frame::new().fill(p.card).corner_radius(r(28)).inner_margin(egui::Margin::symmetric(8, 6)).show(&mut child, |ui| {
+                    ui.horizontal(|ui| {
+                        let w = ui.available_width() - 52.0;
+                        let resp = ui.add(egui::TextEdit::singleline(&mut f.text).hint_text("Type on the PC…").frame(egui::Frame::NONE).font(egui::FontId::proportional(16.0)).desired_width(w));
+                        if !resp.has_focus() && f.text.is_empty() {
+                            resp.request_focus();
+                        }
+                        let enter = resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+                        if tap(&ui::icon_button_sized(ui, ic::SEND, p.on_accent, Some(p.accent), 44.0, 20.0)) || enter {
+                            send = Some((std::mem::take(&mut f.text), enter));
+                        }
+                    });
+                });
+            }
+        }
+        if let Some((text, enter)) = send {
+            if !text.is_empty() {
+                self.send(ToPc::Text { text });
+            }
+            if enter {
+                self.send(ToPc::Key { name: "Return".into(), mods: vec![] });
+            }
+        }
+        if let Some((k, mods)) = key {
+            self.send(ToPc::Key { name: k.into(), mods: mods.iter().map(|m| m.to_string()).collect() });
+        }
+        if toggle_mode {
+            self.store.touchpad = !self.store.touchpad;
+            self.store.save();
+            self.say(if self.store.touchpad { "Touchpad: drag to move, tap to click" } else { "Tap where you want to click" });
+        }
+        if toggle_typing {
+            if let Some(f) = self.full.as_mut() {
+                f.typing = !f.typing;
+            }
+        }
+        if exit {
+            self.exit_full();
+        }
         ui.ctx().request_repaint_after(Duration::from_millis(500));
     }
 
     fn stats(&mut self, ui: &mut Ui) {
+        let p = pal();
         let Some(l) = &self.live else { return };
         let Some(s) = l.stats.clone() else {
-            card(ui, |ui| {
-                ui.horizontal(|ui| {
-                    ui.spinner();
-                    ui.label(RichText::new("Reading the numbers…").color(MUTED));
-                });
+            ui.add_space(40.0);
+            ui.vertical_centered(|ui| {
+                ui::spinner(ui, 36.0);
+                ui.add_space(10.0);
+                ui.label(RichText::new("Reading the numbers…").size(16.0).color(p.muted));
             });
             return;
         };
         let (cpu_hist, mem_hist, net_hist) = (l.cpu_hist.clone(), l.mem_hist.clone(), l.net_hist.clone());
-        egui::ScrollArea::vertical().show(ui, |ui| {
-            card(ui, |ui| {
-                ui.horizontal(|ui| {
-                    ui.label(RichText::new("CPU").color(MUTED));
-                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        ui.label(RichText::new(format!("{:.0}%", s.cpu * 100.0)).size(22.0).strong());
+        egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
+            ui.add_space(4.0);
+            let mem = s.mem_used as f32 / s.mem_total.max(1) as f32;
+            ui.columns(2, |cols| {
+                ui::card(&mut cols[0], |ui| {
+                    ui.vertical_centered(|ui| {
+                        ui::ring(ui, s.cpu, p.accent, 120.0, &format!("{:.0}%", s.cpu * 100.0), "processor");
                     });
                 });
-                spark(ui, &cpu_hist, ACCENT, 1.0);
-                // one thin bar per core
+                ui::card(&mut cols[1], |ui| {
+                    ui.vertical_centered(|ui| {
+                        ui::ring(ui, mem, if mem > 0.9 { p.bad } else { p.good }, 120.0, &format!("{:.0}%", mem * 100.0), &format!("of {}", human_bytes(s.mem_total)));
+                    });
+                });
+            });
+            ui.add_space(10.0);
+            ui::card(ui, |ui| {
+                ui.horizontal(|ui| {
+                    ui::icon(ui, ic::CPU, 20.0, p.accent);
+                    ui.label(RichText::new("Processor").font(medium(16.0)).color(p.text));
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        ui.label(RichText::new(format!("load {:.2}", s.load[0])).size(13.5).color(p.muted));
+                    });
+                });
+                ui.add_space(4.0);
+                ui::spark(ui, &cpu_hist, p.accent, 1.0, 60.0);
+                ui.add_space(6.0);
                 let n = s.cores.len().max(1);
-                let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), 28.0), Sense::hover());
+                let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), 34.0), Sense::hover());
                 let bw = rect.width() / n as f32;
                 for (k, c) in s.cores.iter().enumerate() {
                     let x = rect.left() + k as f32 * bw;
-                    let col = egui::Rect::from_min_max(egui::pos2(x + 1.0, rect.top()), egui::pos2(x + bw - 1.0, rect.bottom()));
-                    ui.painter().rect_filled(col, r(2), DEEP);
+                    let col = Rect::from_min_max(Pos2::new(x + 1.5, rect.top()), Pos2::new(x + bw - 1.5, rect.bottom()));
+                    ui.painter().rect_filled(col, 3.0, p.raised);
                     let mut f = col;
                     f.set_top(col.bottom() - col.height() * c.clamp(0.0, 1.0));
-                    ui.painter().rect_filled(f, r(2), ACCENT.gamma_multiply(0.85));
+                    ui.painter().rect_filled(f, 3.0, p.accent);
                 }
-                ui.label(RichText::new(format!("load {:.2} {:.2} {:.2}", s.load[0], s.load[1], s.load[2])).color(MUTED).size(13.0));
             });
-            ui.add_space(8.0);
-            card(ui, |ui| {
+            ui.add_space(10.0);
+            ui::card(ui, |ui| {
                 ui.horizontal(|ui| {
-                    ui.label(RichText::new("Memory").color(MUTED));
-                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        ui.label(RichText::new(format!("{} / {}", human_bytes(s.mem_used), human_bytes(s.mem_total))).size(18.0).strong());
+                    ui::icon(ui, ic::MEMORY, 20.0, p.good);
+                    ui.label(RichText::new("Memory").font(medium(16.0)).color(p.text));
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        ui.label(RichText::new(format!("{} of {}", human_bytes(s.mem_used), human_bytes(s.mem_total))).size(13.5).color(p.muted));
                     });
                 });
-                spark(ui, &mem_hist, GOOD, 1.0);
+                ui.add_space(4.0);
+                ui::spark(ui, &mem_hist, p.good, 1.0, 48.0);
                 if s.swap_total > 0 {
-                    ui.label(RichText::new(format!("swap {} / {}", human_bytes(s.swap_used), human_bytes(s.swap_total))).color(MUTED).size(13.0));
+                    ui.label(RichText::new(format!("swap {} of {}", human_bytes(s.swap_used), human_bytes(s.swap_total))).size(13.0).color(p.muted));
                 }
             });
-            ui.add_space(8.0);
-            card(ui, |ui| {
+            ui.add_space(10.0);
+            ui::card(ui, |ui| {
                 ui.horizontal(|ui| {
-                    ui.label(RichText::new("Network").color(MUTED));
-                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        ui.label(RichText::new(format!("{} in  ·  {} out", rate(s.net_rx), rate(s.net_tx))).strong());
+                    ui::icon(ui, ic::UPDOWN, 20.0, p.warn);
+                    ui.label(RichText::new("Network").font(medium(16.0)).color(p.text));
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        ui.label(RichText::new(format!("↓ {}   ↑ {}", rate(s.net_rx), rate(s.net_tx))).size(13.5).color(p.muted));
                     });
                 });
+                ui.add_space(4.0);
                 let max = net_hist.iter().cloned().fold(1.0, f32::max);
-                spark(ui, &net_hist, WARN, max);
+                ui::spark(ui, &net_hist, p.warn, max, 48.0);
             });
             if !s.temps.is_empty() || s.gpu.is_some() || s.battery.is_some() {
-                ui.add_space(8.0);
-                card(ui, |ui| {
+                ui.add_space(10.0);
+                ui::card(ui, |ui| {
                     ui.horizontal_wrapped(|ui| {
-                        for t in &s.temps {
-                            let col = if t.celsius > 85.0 { BAD } else if t.celsius > 70.0 { WARN } else { TEXT };
-                            ui.vertical(|ui| {
-                                ui.label(RichText::new(&t.label).color(MUTED).size(13.0));
-                                ui.label(RichText::new(format!("{:.0}°C", t.celsius)).color(col).size(20.0).strong());
+                        ui.spacing_mut().item_spacing = vec2(10.0, 10.0);
+                        let tile = |ui: &mut Ui, glyph: &str, label: &str, value: String, color: Color32| {
+                            egui::Frame::new().fill(p.raised).corner_radius(r(16)).inner_margin(egui::Margin::symmetric(14, 10)).show(ui, |ui| {
+                                ui.vertical(|ui| {
+                                    ui.spacing_mut().item_spacing.y = 0.0;
+                                    ui.horizontal(|ui| {
+                                        ui.spacing_mut().item_spacing.x = 4.0;
+                                        ui::icon(ui, glyph, 15.0, p.muted);
+                                        ui.label(RichText::new(label).size(13.0).color(p.muted));
+                                    });
+                                    ui.label(RichText::new(value).font(semibold(20.0)).color(color));
+                                });
                             });
-                            ui.add_space(14.0);
+                        };
+                        for t in &s.temps {
+                            let col = if t.celsius > 85.0 { p.bad } else if t.celsius > 70.0 { p.warn } else { p.text };
+                            tile(ui, ic::THERMOMETER, &t.label, format!("{:.0}°C", t.celsius), col);
                         }
                         if let Some(g) = s.gpu {
-                            ui.vertical(|ui| {
-                                ui.label(RichText::new("GPU").color(MUTED).size(13.0));
-                                ui.label(RichText::new(format!("{:.0}%", g * 100.0)).size(20.0).strong());
-                            });
-                            ui.add_space(14.0);
+                            tile(ui, ic::GAUGE, "GPU", format!("{:.0}%", g * 100.0), p.text);
                         }
                         if let Some(b) = s.battery {
-                            ui.vertical(|ui| {
-                                ui.label(RichText::new(if s.charging { "Battery ⚡" } else { "Battery" }).color(MUTED).size(13.0));
-                                ui.label(RichText::new(format!("{b:.0}%")).size(20.0).strong());
-                            });
+                            tile(ui, ic::BATTERY, if s.charging { "Charging" } else { "Battery" }, format!("{b:.0}%"), p.text);
                         }
                     });
                 });
             }
             if !s.disks.is_empty() {
-                ui.add_space(8.0);
-                card(ui, |ui| {
-                    ui.label(RichText::new("Disks").color(MUTED));
+                ui.add_space(10.0);
+                ui::card(ui, |ui| {
+                    ui.horizontal(|ui| {
+                        ui::icon(ui, ic::DISKS, 20.0, p.accent);
+                        ui.label(RichText::new("Disks").font(medium(16.0)).color(p.text));
+                    });
                     for d in &s.disks {
                         let f = d.used as f32 / d.total.max(1) as f32;
+                        ui.add_space(4.0);
                         ui.horizontal(|ui| {
-                            ui.label(&d.mount);
-                            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                                ui.label(RichText::new(format!("{} of {}", human_bytes(d.used), human_bytes(d.total))).color(MUTED).size(13.0));
+                            ui.label(RichText::new(&d.mount).size(14.5).color(p.text));
+                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                ui.label(RichText::new(format!("{} free", human_bytes(d.total.saturating_sub(d.used)))).size(13.0).color(p.muted));
                             });
                         });
-                        bar(ui, f, if f > 0.9 { BAD } else { ACCENT });
+                        ui::bar(ui, f, if f > 0.9 { p.bad } else { p.accent });
                     }
                 });
             }
-            ui.add_space(8.0);
-            card(ui, |ui| {
-                ui.label(RichText::new("Busiest programs").color(MUTED));
-                for p in &s.top {
+            ui.add_space(10.0);
+            ui::card(ui, |ui| {
+                ui.horizontal(|ui| {
+                    ui::icon(ui, ic::WINDOW, 20.0, p.accent);
+                    ui.label(RichText::new("Busiest programs").font(medium(16.0)).color(p.text));
+                });
+                ui.add_space(2.0);
+                for pr in &s.top {
                     ui.horizontal(|ui| {
-                        ui.label(&p.name);
-                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                            ui.label(RichText::new(human_bytes(p.mem)).color(MUTED).size(13.0));
-                            ui.label(RichText::new(format!("{:.0}%", p.cpu * 100.0)).monospace());
+                        ui.label(RichText::new(&pr.name).size(14.5).color(p.text));
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            ui.label(RichText::new(human_bytes(pr.mem)).size(13.0).color(p.muted));
+                            ui.label(RichText::new(format!("{:.0}%", pr.cpu * 100.0)).font(egui::FontId::monospace(14.0)).color(p.text));
                         });
                     });
                 }
                 let up = s.uptime;
-                ui.label(RichText::new(format!("up {}d {}h {}m", up / 86400, (up / 3600) % 24, (up / 60) % 60)).color(MUTED).size(13.0));
+                ui.add_space(4.0);
+                ui.label(RichText::new(format!("On for {}d {}h {}m", up / 86400, (up / 3600) % 24, (up / 60) % 60)).size(13.0).color(p.muted));
             });
+            ui.add_space(20.0);
         });
     }
 
     fn control(&mut self, ui: &mut Ui) {
+        let p = pal();
         let mut sends: Vec<ToPc> = vec![];
+        let mut confirm = None;
         let Some(l) = &mut self.live else { return };
         if l.stats.is_none() && l.last_stats.elapsed() > Duration::from_secs(2) {
             l.last_stats = Instant::now();
             sends.push(ToPc::Stats);
         }
         let act = |n: &str, a: Option<String>| ToPc::Action { name: n.into(), arg: a };
-        egui::ScrollArea::vertical().show(ui, |ui| {
-            label(ui, "Media");
-            card(ui, |ui| {
-                if let Some(m) = l.stats.as_ref().and_then(|s| s.media.clone()) {
-                    ui.label(RichText::new(m).strong());
-                }
+        egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
+            ui.add_space(4.0);
+            ui::card(ui, |ui| {
                 ui.horizontal(|ui| {
-                    let w = (ui.available_width() - 20.0) / 3.0;
-                    for (kind, a) in [(0, "media_prev"), (1, "media_play_pause"), (2, "media_next")] {
-                        let resp = ui.add(egui::Button::new("").min_size(vec2(w, 52.0)).corner_radius(r(16)));
-                        media_icon(ui, resp.rect.center(), kind);
-                        if resp.clicked() {
-                            sends.push(act(a, None));
-                        }
+                    ui::icon(ui, ic::WAVE, 20.0, p.accent);
+                    let title = l.stats.as_ref().and_then(|s| s.media.clone()).unwrap_or_else(|| "Media".into());
+                    ui.add(egui::Label::new(RichText::new(title).font(medium(16.0)).color(p.text)).truncate());
+                });
+                ui.add_space(10.0);
+                ui.horizontal(|ui| {
+                    let w = ui.available_width();
+                    ui.add_space((w - 64.0 * 3.0 - 32.0) / 2.0);
+                    ui.spacing_mut().item_spacing.x = 16.0;
+                    if tap(&ui::icon_button_sized(ui, ic::PREV, p.text, Some(p.raised), 56.0, 24.0)) {
+                        sends.push(act("media_prev", None));
+                    }
+                    if tap(&ui::icon_button_sized(ui, ic::PLAY, p.on_accent, Some(p.accent), 72.0, 30.0)) {
+                        sends.push(act("media_play_pause", None));
+                    }
+                    if tap(&ui::icon_button_sized(ui, ic::NEXT, p.text, Some(p.raised), 56.0, 24.0)) {
+                        sends.push(act("media_next", None));
                     }
                 });
+                ui.add_space(10.0);
                 ui.horizontal(|ui| {
-                    ui.label("Volume");
-                    let resp = ui.add(egui::Slider::new(&mut l.volume, 0.0..=1.0).show_value(false));
+                    if tap(&ui::icon_button_sized(ui, ic::MUTE, p.muted, None, 40.0, 20.0)) {
+                        sends.push(act("mute", None));
+                    }
+                    ui.spacing_mut().slider_width = ui.available_width() - 48.0;
+                    let resp = ui.add(egui::Slider::new(&mut l.volume, 0.0..=1.0).show_value(false).trailing_fill(true));
                     if resp.drag_stopped() || (resp.changed() && !resp.dragged()) {
                         sends.push(act("volume", Some(format!("{}", (l.volume * 100.0).round()))));
                     }
-                    if ghost(ui, "Mute").clicked() {
-                        sends.push(act("mute", None));
-                    }
+                    ui::icon(ui, ic::SPEAKER, 20.0, p.muted);
                 });
             });
-            label(ui, "Workspaces");
-            card(ui, |ui| {
-                ui.horizontal_wrapped(|ui| {
-                    let cur = l.stats.as_ref().and_then(|s| s.workspace);
-                    for n in 1..=9u32 {
-                        let on = cur == Some(n);
-                        let b = egui::Button::new(RichText::new(n.to_string()).color(if on { INK } else { TEXT }).strong()).fill(if on { ACCENT } else { RAISED }).corner_radius(r(22)).min_size(vec2(48.0, 48.0));
-                        if ui.add(b).clicked() {
-                            sends.push(act("workspace", Some(n.to_string())));
+            ui::section(ui, "Workspaces");
+            ui::card(ui, |ui| {
+                let cur = l.stats.as_ref().and_then(|s| s.workspace);
+                let gap = 8.0;
+                let w = ((ui.available_width() - gap * 4.0) / 5.0).floor();
+                for row in [1..=5u32, 6..=9u32] {
+                    ui.horizontal(|ui| {
+                        ui.spacing_mut().item_spacing.x = gap;
+                        for n in row {
+                            let on = cur == Some(n);
+                            let (rect, resp) = ui.allocate_exact_size(vec2(w, 48.0), Sense::click());
+                            ui.painter().rect_filled(rect, 16.0, if on { p.accent } else { p.raised });
+                            ui.painter().text(rect.center(), Align2::CENTER_CENTER, n.to_string(), semibold(17.0), if on { p.on_accent } else { p.text });
+                            if tap(&resp) {
+                                sends.push(act("workspace", Some(n.to_string())));
+                            }
+                        }
+                    });
+                    ui.add_space(2.0);
+                }
+            });
+            ui::section(ui, "Power");
+            ui.columns(2, |cols| {
+                let tiles: [(&str, &str, &'static str); 4] = [(ic::LOCK, "Lock", "lock"), (ic::MOON, "Sleep", "suspend"), (ic::RESTART, "Restart", "reboot"), (ic::POWER, "Shut down", "shutdown")];
+                for (k, (g, label, a)) in tiles.iter().enumerate() {
+                    let ui = &mut cols[k % 2];
+                    let danger = *a == "shutdown";
+                    let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), 64.0), Sense::click());
+                    ui.painter().rect_filled(rect, 20.0, if danger { mix(p.card, p.bad, 0.14) } else { p.card });
+                    if resp.is_pointer_button_down_on() {
+                        ui.painter().rect_filled(rect, 20.0, p.text.gamma_multiply(0.08));
+                    }
+                    let fg = if danger { p.bad } else { p.text };
+                    ui::icon_at(ui, Pos2::new(rect.left() + 28.0, rect.center().y), g, 22.0, fg, false);
+                    ui.painter().text(Pos2::new(rect.left() + 52.0, rect.center().y), Align2::LEFT_CENTER, *label, medium(15.5), fg);
+                    if tap(&resp) {
+                        if *a == "lock" {
+                            sends.push(act("lock", None));
+                        } else {
+                            confirm = Some(*a);
                         }
                     }
-                });
+                    ui.add_space(4.0);
+                }
             });
-            label(ui, "Clipboard");
-            card(ui, |ui| {
-                ui.add(egui::TextEdit::multiline(&mut l.clipboard).desired_rows(3).desired_width(f32::INFINITY).hint_text("Text to send to the PC's clipboard"));
+            ui::section(ui, "Clipboard");
+            ui::card(ui, |ui| {
+                ui::field_multi(ui, &mut l.clipboard, "Text to send to the PC's clipboard", 3);
+                ui.add_space(8.0);
                 ui.horizontal(|ui| {
-                    if primary(ui, "  Send to PC  ").clicked() {
+                    if tap(&ui::button(ui, Kind::Tonal, Some(ic::SEND), "Send", 0.0)) {
                         sends.push(act("clipboard_set", Some(l.clipboard.clone())));
                     }
-                    if ghost(ui, "  Get from PC  ").clicked() {
+                    if tap(&ui::button(ui, Kind::Outlined, Some(ic::DOWNLOAD), "From PC", 0.0)) {
                         sends.push(ToPc::ClipboardGet);
                     }
-                    if ghost(ui, "  Copy here  ").clicked() {
+                    if tap(&ui::icon_button(ui, ic::COPY, p.text, None)) {
                         ui.ctx().copy_text(l.clipboard.clone());
                     }
                 });
             });
-            label(ui, "Open on the PC");
-            card(ui, |ui| {
-                ui.add(egui::TextEdit::singleline(&mut l.text).desired_width(f32::INFINITY).hint_text("an app (firefox) or a web address"));
+            ui::section(ui, "Open on the PC");
+            ui::card(ui, |ui| {
+                let w = ui.available_width();
+                ui::field(ui, &mut l.open, "An app (firefox) or a web address", w);
+                ui.add_space(8.0);
                 ui.horizontal(|ui| {
-                    if primary(ui, "  Open  ").clicked() && !l.text.trim().is_empty() {
-                        let t = l.text.trim().to_string();
+                    if tap(&ui::button(ui, Kind::Filled, Some(ic::OPEN), "Open", 0.0)) && !l.open.trim().is_empty() {
+                        let t = l.open.trim().to_string();
                         if t.contains("://") || (t.contains('.') && !t.contains(' ')) {
                             let url = if t.contains("://") { t } else { format!("https://{t}") };
                             sends.push(act("open_url", Some(url)));
                         } else {
                             sends.push(act("run", Some(t)));
                         }
-                        l.text.clear();
+                        l.open.clear();
                     }
-                    if ghost(ui, "  Show as notification  ").clicked() && !l.text.trim().is_empty() {
-                        sends.push(act("notify", Some(std::mem::take(&mut l.text))));
+                    if tap(&ui::button(ui, Kind::Text, Some(ic::BELL), "As notification", 0.0)) && !l.open.trim().is_empty() {
+                        sends.push(act("notify", Some(std::mem::take(&mut l.open))));
                     }
                 });
             });
-            label(ui, "Power");
-            card(ui, |ui| {
-                ui.horizontal_wrapped(|ui| {
-                    if ghost(ui, "  Lock  ").clicked() {
-                        sends.push(act("lock", None));
-                    }
-                    if ghost(ui, "  Sleep  ").clicked() {
-                        l.confirm = Some("suspend");
-                    }
-                    if ghost(ui, "  Restart  ").clicked() {
-                        l.confirm = Some("reboot");
-                    }
-                    if danger(ui, "  Shut down  ").clicked() {
-                        l.confirm = Some("shutdown");
-                    }
-                });
-                if let Some(c) = l.confirm {
-                    ui.add_space(8.0);
-                    ui.label(RichText::new(match c {
-                        "suspend" => "Put the PC to sleep?",
-                        "reboot" => "Restart the PC? Unsaved work is lost.",
-                        _ => "Shut the PC down? Unsaved work is lost.",
-                    }).color(WARN));
-                    ui.horizontal(|ui| {
-                        if danger(ui, "  Yes  ").clicked() {
-                            sends.push(act(c, None));
-                            l.confirm = None;
-                        }
-                        if ghost(ui, "  No  ").clicked() {
-                            l.confirm = None;
-                        }
-                    });
-                }
-            });
-            ui.add_space(20.0);
+            ui.add_space(24.0);
         });
         for m in sends {
             self.send(m);
+        }
+        if let Some(c) = confirm {
+            self.confirm = Some(Confirm::Power(c));
         }
     }
 }

@@ -189,6 +189,8 @@ impl Oxide {
             cur: RectF::default(),
             mv: None,
             open: None,
+            size_deferred: false,
+            held: None,
             fade: 1.0,
             fade_anim: None,
             border_mix: 0.0,
@@ -481,6 +483,83 @@ impl Oxide {
         self.apply_visual(i);
     }
 
+    /// A commit of a window that waits for its size: send the size after the first frame, show the window once it
+    /// draws at that size (or after a short wait, for clients that keep their own size).
+    pub fn held_commit(&mut self, i: usize) {
+        let w = &self.wins[i];
+        if w.held.is_none() {
+            return;
+        }
+        let drawn = w.window.geometry().size;
+        // nothing is drawn for a held window, so no frame goes out that would answer its frame callback: answer it
+        // here, or the client waits (until the time-out) before drawing the next frame
+        let window = w.window.clone();
+        if let Some(o) = self.monitors.get(self.shown_on(w.ws).unwrap_or(self.focused_mon)).map(|m| m.output.clone()) {
+            window.send_frame(&o, self.clock.now(), Some(Duration::ZERO), |_, _| Some(o.clone()));
+        }
+        let w = &self.wins[i];
+        if w.size_deferred {
+            if drawn.w > 0 && drawn.h > 0 {
+                self.wins[i].size_deferred = false;
+                self.apply_visual(i);
+            }
+            return;
+        }
+        let b = w.border;
+        let want: Size<i32, Logical> = ((w.rect.size.w - 2 * b).max(1), (w.rect.size.h - 2 * b).max(1)).into();
+        let late = w.held.is_some_and(|t| t.elapsed() > std::time::Duration::from_millis(350));
+        if drawn == want || late {
+            self.release_held(i);
+        }
+    }
+
+    fn release_held(&mut self, i: usize) {
+        let now: Duration = self.clock.now().into();
+        let anims = &self.config.animations;
+        let w = &mut self.wins[i];
+        w.held = None;
+        w.size_deferred = false;
+        // the open animation starts now that there is something to show
+        if w.open.is_some() {
+            w.open = Some(now);
+        }
+        if w.fade_anim.is_some() {
+            w.fade = 0.0;
+            w.fade_anim = Some(Tween { from: 0.0, to: 1.0, start: now });
+        }
+        let _ = anims;
+        self.apply_visual(i);
+        self.dirty = true;
+        self.kick_animations();
+    }
+
+    /// Chromium and Electron apps: their files sit next to the program (also for renamed Electron apps and inside
+    /// Flatpaks, seen through /proc/PID/root). They get the size in two steps, see `apply_visual`.
+    fn is_chromium(&self, i: usize) -> bool {
+        let Some(pid) = self.window_pid(i) else { return false };
+        let Ok(exe) = std::fs::read_link(format!("/proc/{pid}/exe")) else { return false };
+        let Some(dir) = exe.parent() else { return false };
+        let root = std::path::PathBuf::from(format!("/proc/{pid}/root"));
+        let dir = root.join(dir.strip_prefix("/").unwrap_or(dir));
+        ["v8_context_snapshot.bin", "snapshot_blob.bin", "resources.pak"].iter().any(|f| dir.join(f).exists())
+    }
+
+    /// Windows that never drew at their size are shown anyway after a moment.
+    pub fn release_late_windows(&mut self) {
+        let late: Vec<usize> = (0..self.wins.len())
+            .filter(|&i| self.wins[i].held.is_some_and(|t| t.elapsed() > std::time::Duration::from_millis(350)))
+            .collect();
+        for i in late {
+            if self.wins[i].size_deferred {
+                self.wins[i].size_deferred = false;
+                self.wins[i].held = Some(std::time::Instant::now());
+                self.apply_visual(i);
+            } else {
+                self.release_held(i);
+            }
+        }
+    }
+
     /// Advance the animations of window `i` to `now`. Returns true while something still moves.
     fn eval_win(&mut self, i: usize, now: Duration) -> bool {
         let anims = &self.config.animations;
@@ -553,9 +632,27 @@ impl Oxide {
             let _ = x.set_fullscreen(fullscreen);
             let _ = x.configure(Rectangle::new(inner_loc, inner_size));
         }
+        let first = (tiled || fullscreen) && win.window.toplevel().is_some_and(|t| !t.is_initial_configure_sent()) && self.is_chromium(i);
+        let defer = first || win.size_deferred;
+        if first {
+            let win = &mut self.wins[i];
+            win.size_deferred = true;
+            win.held = Some(std::time::Instant::now());
+        }
+        // Chromium/Electron apps, like on Hyprland: the first configure has the screen's size, the real one follows
+        // after the first frame. Electron apps that place their own views (BaseWindow) only lay them out again on a
+        // second, real resize; with the right size at once they stay at their default size inside a bigger window.
+        let first_size = self
+            .shown_on(self.wins[i].ws)
+            .or(Some(self.focused_mon))
+            .and_then(|mi| self.monitors.get(mi))
+            .and_then(|m| self.space.output_geometry(&m.output))
+            .map(|g| g.size)
+            .filter(|s| *s != inner_size);
+        let win = &self.wins[i];
         if let Some(t) = win.window.toplevel() {
             t.with_pending_state(|st| {
-                st.size = Some(inner_size);
+                st.size = if defer { first_size } else { Some(inner_size) };
                 for s in [TState::TiledLeft, TState::TiledRight, TState::TiledTop, TState::TiledBottom] {
                     if tiled {
                         st.states.set(s);
@@ -583,8 +680,9 @@ impl Oxide {
 
     /// Advance all running animations. Returns whether any are still active.
     pub fn tick_animations(&mut self) -> bool {
+        self.release_late_windows();
         let now: Duration = self.clock.now().into();
-        let mut active = false;
+        let mut active = self.wins.iter().any(|w| w.held.is_some());
         for i in 0..self.wins.len() {
             if self.eval_win(i, now) {
                 active = true;
@@ -616,7 +714,7 @@ impl Oxide {
     pub fn animations_running(&self) -> bool {
         self.ws_anim.is_some()
             || !self.closing.is_empty()
-            || self.wins.iter().any(|w| w.mv.is_some() || w.open.is_some() || w.fade_anim.is_some() || w.border_anim.is_some())
+            || self.wins.iter().any(|w| w.held.is_some() || w.mv.is_some() || w.open.is_some() || w.fade_anim.is_some() || w.border_anim.is_some())
     }
 
     /// Start the frame timer if animations are running and it is not already ticking.
@@ -972,6 +1070,7 @@ impl Oxide {
                 })
                 .collect(),
             config_error: self.config_error.clone(),
+            whats_new: self.whats_new.clone(),
             super_held: self.super_held,
         }
     }

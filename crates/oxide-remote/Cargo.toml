@@ -19,3 +19,4 @@ wayland-client = "0.31"
 wayland-protocols-wlr = { version = "0.3", features = ["client"] }
 rustix = { version = "1", features = ["fs", "mm"] }
 jpeg-encoder = { version = "0.6", features = ["simd"] }
+ureq = { version = "2", default-features = false, features = ["tls"] }

@@ -7,6 +7,7 @@
 //!   oxide-remoted rename NAME  the name phones see
 mod actions;
 mod capture;
+mod reach;
 mod server;
 mod stats;
 mod store;
@@ -51,8 +52,9 @@ fn control(shared: server::Shared) {
                 ("status", _) => {
                     let s = shared.store.lock().unwrap();
                     let waiting = shared.pairing.lock().unwrap().code.as_ref().filter(|(_, u)| Instant::now() < *u).map(|(c, _)| c.clone());
+                    let reach = shared.reach.lock().map(|r| r.clone()).unwrap_or_default();
                     serde_json::json!({
-                        "name": s.pc_name, "id": s.pc_id, "macs": store::macs(), "pairing": waiting,
+                        "name": s.pc_name, "id": s.pc_id, "macs": store::macs(), "pairing": waiting, "reach": reach,
                         "phones": s.phones.iter().map(|p| serde_json::json!({"id": p.id, "name": p.name, "paired": p.paired, "last_seen": p.last_seen})).collect::<Vec<_>>(),
                     })
                     .to_string()
@@ -68,6 +70,12 @@ fn control(shared: server::Shared) {
                     s.pc_name = name.trim().to_string();
                     s.save();
                     "{\"ok\":true}".into()
+                }
+                // stop cleanly: the router forgets the forwarded port
+                ("quit", _) => {
+                    reach::stop(&shared.reach);
+                    let _ = writeln!(w, "{{\"ok\":true}}");
+                    std::process::exit(0)
                 }
                 ("cancel", _) => {
                     shared.pairing.lock().unwrap().code = None;
@@ -119,7 +127,10 @@ fn main() {
         store: Arc::new(Mutex::new(store::Store::load())),
         pairing: Arc::new(Mutex::new(server::Pairing::default())),
         sampler: stats::Sampler::default(),
+        reach: Default::default(),
+        remote_handshakes: Default::default(),
     };
+    reach::start(shared.reach.clone(), shared.store.clone());
     shared.sampler.start();
     control(shared.clone());
     server::discovery(shared.clone());

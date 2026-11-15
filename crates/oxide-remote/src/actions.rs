@@ -68,6 +68,16 @@ pub fn action(name: &str, arg: Option<&str>) -> Result<(), String> {
             c.stdin.take().map(|mut s| s.write_all(arg.unwrap_or("").as_bytes()));
             c.wait().map(|_| ()).map_err(|e| e.to_string())
         }
+        // wake another PC on this network: "aa:bb:cc:dd:ee:ff" or "aa:bb:cc:dd:ee:ff 192.168.1.20"
+        "wake" => {
+            let mut it = arg.unwrap_or("").split_whitespace();
+            let mac = it.next().ok_or("no MAC address")?;
+            let bcast = it.next().and_then(|ip| ip.parse::<std::net::Ipv4Addr>().ok()).map(|ip| {
+                let o = ip.octets();
+                std::net::Ipv4Addr::new(o[0], o[1], o[2], 255)
+            });
+            oxide_remote_proto::wake(mac, bcast).map_err(|e| e.to_string())
+        }
         other => Err(format!("unknown action {other}")),
     }
 }

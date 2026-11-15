@@ -9,6 +9,7 @@ Pop Pop.qml
 Dock Dock.qml
 Hud Hud.qml
 ConfigError ConfigError.qml
+WhatsNew WhatsNew.qml
 PillSlider PillSlider.qml
 Chip Chip.qml
 Toggle Toggle.qml

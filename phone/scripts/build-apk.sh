@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Builds OxideRemote-<version>.apk without Gradle: cargo-ndk for the Rust code, aapt2 for the manifest and
-# resources, zipalign + apksigner to finish. No Java code: the app is a NativeActivity.
+# resources, javac + d8 for the small Java part (system bars, colors, full screen, updates), zipalign + apksigner.
 # Signing: OXIDE_KS, OXIDE_KS_PASS, OXIDE_KEY_ALIAS, OXIDE_KEY_PASS (release), otherwise the Android debug key.
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -17,7 +17,14 @@ cargo ndk -t arm64-v8a -o $B/jniLibs build --lib --profile "${PROFILE:-release}"
 "$BT/aapt2" compile --dir res -o $B/res.zip
 "$BT/aapt2" link -o $B/base.apk -I "$JAR" --manifest AndroidManifest.xml --min-sdk-version 26 --target-sdk-version 35 \
   --version-code "$CODE" --version-name "$VERSION" $B/res.zip
+# the Java part: a JDK (javac) from JAVA_HOME, ~/.local/jdk or the PATH
+JAVAC="$(ls "${JAVA_HOME:-/nonexistent}"/bin/javac ~/.local/jdk/*/bin/javac 2>/dev/null | head -1 || true)"
+JAVAC="${JAVAC:-javac}"
+mkdir -p $B/classes $B/dex
+"$JAVAC" --release 11 -nowarn -classpath "$JAR" -d $B/classes $(find java -name '*.java')
+PATH="$(dirname "$JAVAC"):$PATH" "$BT/d8" --min-api 26 --lib "$JAR" --output $B/dex $(find $B/classes -name '*.class')
 cp $B/base.apk $B/unaligned.apk
+(cd $B/dex && zip -q -X ../unaligned.apk classes.dex)
 cp $B/jniLibs/arm64-v8a/liboxide_remote.so $B/apk/lib/arm64-v8a/
 (cd $B/apk && zip -q -X -0 ../unaligned.apk lib/arm64-v8a/liboxide_remote.so)
 "$BT/zipalign" -f -P 16 4 $B/unaligned.apk $B/aligned.apk

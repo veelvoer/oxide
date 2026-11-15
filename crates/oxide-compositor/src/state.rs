@@ -64,6 +64,10 @@ pub struct Win {
     pub mv: Option<Tween<RectF>>,
     /// Start time of the open (pop-in) animation.
     pub open: Option<Duration>,
+    /// A tiled Chromium/Electron window gets its real size only after its first frame (see `apply_visual`); until
+    /// it has drawn at that size it is not shown, so nothing jumps.
+    pub size_deferred: bool,
+    pub held: Option<std::time::Instant>,
     /// Opacity multiplier from the fade animation, 0..=1.
     pub fade: f32,
     pub fade_anim: Option<Tween<f32>>,
@@ -184,6 +188,7 @@ pub struct Oxide {
     pub sampling_bg: bool,
     /// the config file's last parse error (shown by the shell; the last good config stays active)
     pub config_error: Option<oxide_ipc::ConfigProblem>,
+    pub whats_new: Option<oxide_ipc::WhatsNew>,
     pub config_mtime: Option<std::time::SystemTime>,
     /// Super is down with no other key pressed since (the ambient HUD shows)
     pub super_held: bool,
@@ -348,6 +353,7 @@ impl Oxide {
             auto_stamp: String::new(),
             sampling_bg: false,
             config_error: None,
+            whats_new: None,
             config_mtime: None,
             super_held: false,
             super_down: None,
@@ -545,8 +551,18 @@ impl Oxide {
                 .ok();
         } else if !want && running {
             if let Some(mut c) = self.remote.take() {
-                let _ = c.kill();
-                let _ = c.wait();
+                // ask it to stop (it removes the router's port forwarding), then make sure
+                std::thread::spawn(move || {
+                    let sock = std::env::var_os("XDG_RUNTIME_DIR").map(std::path::PathBuf::from).unwrap_or_else(std::env::temp_dir).join("oxide-remote.sock");
+                    if let Ok(mut s) = std::os::unix::net::UnixStream::connect(sock) {
+                        use std::io::Write;
+                        let _ = s.set_read_timeout(Some(std::time::Duration::from_secs(4)));
+                        let _ = writeln!(s, "quit");
+                        let _ = std::io::Read::read(&mut s, &mut [0u8; 64]);
+                    }
+                    let _ = c.kill();
+                    let _ = c.wait();
+                });
             }
         }
     }
@@ -556,6 +572,7 @@ impl Oxide {
         self.config_watch_start();
         self.telemetry_start();
         self.sync_remote();
+        self.updates_start();
         // theme files and app colors: helper tools are involved, so never on the compositor thread
         crate::render::set_clear(&oxide_config::theme::palette(&self.config.theme).bg);
         // kitty windows started from now on read the standard (or the user's own) configuration

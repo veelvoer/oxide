@@ -1,6 +1,7 @@
 mod anim;
 mod autotheme;
 mod confwatch;
+mod updates;
 mod groups;
 mod overview;
 mod telemetry;
