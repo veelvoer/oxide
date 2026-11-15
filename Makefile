@@ -16,7 +16,9 @@ all: build
 build:
 	$(CARGO) build --release --locked
 
-install: build
+# install only copies: under sudo, root usually has no Rust toolchain, so build first with plain `make`
+install:
+	@for b in $(BINS); do [ -x $(TARGET)/$$b ] || { echo "$(TARGET)/$$b is missing: run 'make' first (without sudo)"; exit 1; }; done
 	install -d $(DESTDIR)$(PREFIX)/bin
 	for b in $(BINS); do install -m755 $(TARGET)/$$b $(DESTDIR)$(PREFIX)/bin/$$b; done
 	install -m755 contrib/oxide-session $(DESTDIR)$(PREFIX)/bin/oxide-session
