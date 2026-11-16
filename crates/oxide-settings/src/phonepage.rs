@@ -63,6 +63,19 @@ pub fn page(app: &mut App, ui: &mut Ui) {
         row_full(ui, None, "Wake-on-LAN", &sub, "", true, |_| {});
     });
 
+    card(ui, "Other networks", |ui| {
+        row_sub(
+            ui,
+            "lan-connect",
+            "Find this PC on any network",
+            "Paired phones find it at school or work too. Its current address goes into a note only they can read.",
+            true,
+            |ui| {
+                switch(ui, &mut app.cfg.remote.notes);
+            },
+        );
+    });
+
     card(ui, "Away from home", |ui| {
         let r = &app.cfg.remote;
         let mut on = r.anywhere;

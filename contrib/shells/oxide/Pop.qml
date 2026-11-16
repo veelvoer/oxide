@@ -84,11 +84,18 @@ PanelWindow {
         // it grows out of the corner it hangs from (the bar button you clicked) and settles with a tiny overshoot
         transformOrigin: win.place === "top-center" || win.place === "window" ? Item.Top : win.place === "center" ? Item.Center
                        : win.place === "right" ? Item.Right : (win.barOnTop ? Item.TopRight : Item.BottomRight)
-        scale: win.shown ? 1 : 0.9
-        Behavior on opacity { NumberAnimation { duration: Theme.normal; easing.type: Easing.OutCubic } }
-        Behavior on scale { NumberAnimation { duration: 280; easing.type: win.shown ? Easing.OutBack : Easing.InCubic; easing.overshoot: 1.2 } }
+        // Expressive: it grows from further away and springs past full size before it settles; closing is quick
+        scale: win.shown ? 1 : (Theme.expressive ? 0.8 : 0.9)
+        Behavior on opacity { NumberAnimation { duration: win.shown ? Theme.normal : Theme.fast * 1.4; easing.type: Easing.OutCubic } }
+        Behavior on scale {
+            NumberAnimation {
+                duration: win.shown ? (Theme.expressive ? 420 * Theme.motionScale : 280) : (Theme.expressive ? 170 * Theme.motionScale : 280)
+                easing.type: win.shown ? Easing.OutBack : Easing.InCubic
+                easing.overshoot: Theme.expressive ? 1.6 : 1.2
+            }
+        }
         // when the content changes size (a list opens, results come in) the panel morphs to the new size
-        Behavior on height { enabled: win.shown; NumberAnimation { duration: 240; easing.type: Easing.OutCubic } }
+        Behavior on height { enabled: win.shown; NumberAnimation { duration: Theme.spatial; easing.type: Theme.spatialType; easing.overshoot: Theme.expressive ? 0.7 : 0.6 } }
 
         // clicks inside the box must not close it
         MouseArea { anchors.fill: parent }

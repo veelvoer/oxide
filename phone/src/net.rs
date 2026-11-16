@@ -60,16 +60,16 @@ pub enum Route {
     Away,
 }
 
-/// Try addresses at the same time; the first that answers wins.
-fn race(addrs: &[String], timeout: Duration) -> Option<TcpStream> {
+/// Try addresses at the same time; the first that answers wins (with the address it answered on).
+fn race(addrs: &[String], timeout: Duration) -> Option<(TcpStream, String)> {
     let (tx, rx) = channel();
     let mut n = 0;
     for a in addrs {
         let Some(addr) = a.to_socket_addrs().ok().and_then(|mut i| i.next()) else { continue };
-        let tx = tx.clone();
+        let (tx, a) = (tx.clone(), a.clone());
         n += 1;
         std::thread::spawn(move || {
-            let _ = tx.send(connect_addr(addr, timeout).ok());
+            let _ = tx.send(connect_addr(addr, timeout).ok().map(|s| (s, a)));
         });
     }
     drop(tx);
@@ -81,6 +81,24 @@ fn race(addrs: &[String], timeout: Duration) -> Option<TcpStream> {
         }
     }
     None
+}
+
+/// Look for this PC (by its id) on the network the phone is on now.
+fn find_on_network(pc: &Pc, wait: Duration) -> Option<String> {
+    discover(wait).into_iter().find(|(a, _)| a.id == pc.id).map(|(_, host)| host)
+}
+
+/// Where a PC was found.
+pub struct Found {
+    pub route: Route,
+    /// a new address on the local network (it moved to another network, or got another address)
+    pub host: Option<String>,
+    /// its addresses, when they came from its note
+    pub moved: Option<Whereabouts>,
+}
+
+fn host_of(addr: &str) -> String {
+    addr.rsplit_once(':').map(|(h, _)| h.trim_matches(['[', ']']).to_string()).unwrap_or_else(|| addr.to_string())
 }
 
 /// The PC's latest note on its rendezvous server: where it is now.
@@ -96,33 +114,46 @@ pub fn whereabouts(pc: &Pc) -> Option<Whereabouts> {
         .max_by_key(|w| w.at)
 }
 
-/// Reach the PC: on the home network first, then at its addresses on the internet, then wherever its latest note
-/// says it is. Returns the new addresses when they came from a note (to remember them).
-pub fn connect_any(pc: &Pc) -> Result<(TcpStream, Route, Option<Whereabouts>), String> {
+/// Reach the PC, wherever it is: at its last address; found on this network by its id (another network, or a new
+/// address); at its addresses on the internet; or wherever its latest note says it is now.
+pub fn connect_any(pc: &Pc) -> Result<(TcpStream, Found), String> {
     if let Ok(s) = connect(&pc.host, pc.port, Duration::from_millis(1200)) {
-        return Ok((s, Route::Home, None));
+        return Ok((s, Found { route: Route::Home, host: None, moved: None }));
     }
-    if let Some(s) = race(&pc.remote, Duration::from_secs(4)) {
-        return Ok((s, Route::Away, None));
-    }
-    if let Some(w) = whereabouts(pc).filter(|w| w.addrs != pc.remote) {
-        if let Some(s) = race(&w.addrs, Duration::from_secs(5)) {
-            return Ok((s, Route::Away, Some(w)));
+    if let Some(h) = find_on_network(pc, Duration::from_millis(1500)) {
+        if let Ok(s) = connect(&h, pc.port, Duration::from_secs(2)) {
+            return Ok((s, Found { route: Route::Home, host: Some(h), moved: None }));
         }
     }
-    Err(if pc.remote.is_empty() {
-        format!("{} is not on this network. To reach it from anywhere, turn on \"Reach this PC from anywhere\" in its Settings > Phone and connect once at home.", pc.name)
-    } else {
-        format!("Cannot reach {}. Is it on?", pc.name)
-    })
+    if let Some((s, a)) = race(&pc.lan, Duration::from_secs(2)) {
+        return Ok((s, Found { route: Route::Home, host: Some(host_of(&a)), moved: None }));
+    }
+    if let Some((s, _)) = race(&pc.remote, Duration::from_secs(4)) {
+        return Ok((s, Found { route: Route::Away, host: None, moved: None }));
+    }
+    if let Some(w) = whereabouts(pc) {
+        if let Some((s, a)) = race(&w.lan, Duration::from_secs(3)) {
+            return Ok((s, Found { route: Route::Home, host: Some(host_of(&a)), moved: Some(w) }));
+        }
+        if let Some((s, _)) = race(&w.addrs, Duration::from_secs(5)) {
+            return Ok((s, Found { route: Route::Away, host: None, moved: Some(w) }));
+        }
+    }
+    Err(format!("Cannot find {}. Is it on, with \"Let my phone connect\" switched on?", pc.name))
 }
 
-/// Whether the PC answers, and how (for the status on the list).
-pub fn reachable(pc: &Pc) -> Option<Route> {
+/// Whether the PC answers, how, and at which new local address if it has one (for the list).
+pub fn reachable(pc: &Pc) -> Option<(Route, Option<String>)> {
     if connect(&pc.host, pc.port, Duration::from_millis(700)).is_ok() {
-        return Some(Route::Home);
+        return Some((Route::Home, None));
     }
-    race(&pc.remote, Duration::from_millis(2500)).map(|_| Route::Away)
+    if let Some(h) = find_on_network(pc, Duration::from_millis(1200)) {
+        return Some((Route::Home, Some(h)));
+    }
+    if let Some((_, a)) = race(&pc.lan, Duration::from_millis(1200)) {
+        return Some((Route::Home, Some(host_of(&a))));
+    }
+    race(&pc.remote, Duration::from_millis(2500)).map(|_| (Route::Away, None))
 }
 
 // ------------------------------------------------------------- pairing
@@ -168,7 +199,7 @@ pub fn pair(host: String, port: u16, phone_id: String, phone_name: String) -> (R
 // ------------------------------------------------------------- session
 
 pub enum Event {
-    Connected { pc_name: String, route: Route },
+    Connected { pc_name: String, route: Route, host: Option<String> },
     /// the PC's addresses changed (learned from its note): remember them
     Moved(Whereabouts),
     Msg(ToPhone),
@@ -191,10 +222,11 @@ pub fn open(pc: &Pc, phone_id: &str, wake: impl Fn() + Send + Sync + 'static) ->
     let wake = std::sync::Arc::new(wake);
     std::thread::spawn(move || {
         let r = (|| -> Result<(), String> {
-            let (mut c, route, moved) = connect_any(&pc)?;
-            if let Some(w) = moved {
+            let (mut c, found) = connect_any(&pc)?;
+            if let Some(w) = found.moved {
                 let _ = ev_tx.send(Event::Moved(w));
             }
+            let (route, host) = (found.route, found.host);
             let ltk: [u8; 32] = unhex(&pc.ltk).and_then(|v| v.try_into().ok()).ok_or("broken pairing; pair again")?;
             let nonce = random::<16>();
             write_hello(&mut c, &Hello::Hello { phone_id, nonce: hex(&nonce) }).map_err(|e| e.to_string())?;
@@ -204,7 +236,7 @@ pub fn open(pc: &Pc, phone_id: &str, wake: impl Fn() + Send + Sync + 'static) ->
                 _ => return Err("unexpected answer".into()),
             };
             let (mut seal, mut open) = session(&ltk, &nonce, &pc_nonce);
-            let _ = ev_tx.send(Event::Connected { pc_name, route });
+            let _ = ev_tx.send(Event::Connected { pc_name, route, host });
             wake();
             // writer: everything the UI sends
             let mut w = c.try_clone().map_err(|e| e.to_string())?;
@@ -250,7 +282,7 @@ pub fn open(pc: &Pc, phone_id: &str, wake: impl Fn() + Send + Sync + 'static) ->
 
 /// Send a few messages in a short session (for example: ask one PC to wake another).
 pub fn one_shot(pc: &Pc, phone_id: &str, msgs: Vec<ToPc>) -> Result<(), String> {
-    let (mut c, _, _) = connect_any(pc)?;
+    let (mut c, _) = connect_any(pc)?;
     let ltk: [u8; 32] = unhex(&pc.ltk).and_then(|v| v.try_into().ok()).ok_or("broken pairing")?;
     let nonce = random::<16>();
     write_hello(&mut c, &Hello::Hello { phone_id: phone_id.to_string(), nonce: hex(&nonce) }).map_err(|e| e.to_string())?;

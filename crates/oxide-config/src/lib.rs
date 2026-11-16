@@ -7,6 +7,7 @@ pub mod anim;
 pub mod autotheme;
 pub mod defaults;
 pub mod hyprland;
+pub mod material;
 pub mod theme;
 
 /// Workspace id used for the special (scratchpad) workspace.
@@ -266,7 +267,27 @@ pub fn default_curves() -> Vec<Curve> {
         Curve::bezier("linear", 0.0, 0.0, 1.0, 1.0),
         Curve::spring("spring", 0.7, 130.0, 16.0),
         Curve::spring("bounce", 0.6, 170.0, 9.0),
+        // Material 3 Expressive motion (mass 1; damping = 2 * ratio * sqrt(stiffness))
+        Curve::spring("m3-spatial", 1.0, 380.0, 31.2),
+        Curve::spring("m3-fast", 1.0, 800.0, 33.9),
+        Curve::spring("m3-effects", 1.0, 1600.0, 80.0),
     ]
+}
+
+impl Animations {
+    /// Material 3 Expressive: springy moves and openings, calm fades.
+    pub fn expressive() -> Self {
+        Self {
+            windows: Anim::new(4.0, "m3-spatial", ""),
+            windows_in: Anim::new(4.0, "m3-spatial", "popin 86%"),
+            windows_out: Anim::new(2.6, "m3-effects", "popin 92%"),
+            workspaces: Anim::new(4.0, "m3-spatial", "slide"),
+            fade_in: Anim::new(3.0, "m3-effects", ""),
+            fade_out: Anim::new(2.1, "m3-effects", ""),
+            border: Anim::new(4.0, "m3-effects", ""),
+            ..Self::default()
+        }
+    }
 }
 
 impl Default for Animations {
@@ -398,11 +419,14 @@ pub struct RemoteCfg {
     pub anywhere: bool,
     /// A ntfy server (https://ntfy.sh or your own) used to tell phones where the PC is; only encrypted data goes there.
     pub rendezvous: String,
+    /// Leave an encrypted note with this PC's current addresses, so paired phones find it on any network (also
+    /// when the network blocks the search). Only the phones can read it.
+    pub notes: bool,
 }
 
 impl Default for RemoteCfg {
     fn default() -> Self {
-        Self { enabled: false, anywhere: false, rendezvous: "https://ntfy.sh".into() }
+        Self { enabled: false, anywhere: false, rendezvous: "https://ntfy.sh".into(), notes: true }
     }
 }
 

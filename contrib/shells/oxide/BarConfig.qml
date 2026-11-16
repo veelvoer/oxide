@@ -31,7 +31,9 @@ Singleton {
     property var right: [{ "id": "tray" }, { "id": "status" }, { "id": "bell" }, { "id": "assistant" }]
 
     // space the bar takes at the screen edge, popups sit just beyond it
-    readonly property real inset: style === "flat" ? 0 : margin
+    // Expressive: always floating islands, a little away from the edge
+    readonly property string look: Theme.expressive ? "floating" : style
+    readonly property real inset: look === "flat" ? 0 : (Theme.expressive ? Math.max(margin, 8) : margin)
     readonly property real barSpace: hidden ? 0 : height + inset * 2
 
     function apply(c) {

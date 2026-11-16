@@ -331,13 +331,17 @@ impl App {
         ui.horizontal(|ui| {
             ui.add_space(4.0);
             let w = ui.available_width() - 4.0;
-            let (rect, _) = ui.allocate_exact_size(vec2(w, 30.0), Sense::hover());
-            ui.painter().rect_filled(rect, radius(4), FIELD());
-            ui.painter().rect_stroke(rect, radius(4), Stroke::new(1.0, BORDER()), egui::StrokeKind::Inside);
+            let (rect, _) = ui.allocate_exact_size(vec2(w, if expressive() { 36.0 } else { 30.0 }), Sense::hover());
+            if expressive() {
+                ui.painter().rect_filled(rect, rect.height() / 2.0, CARD_HOVER());
+            } else {
+                ui.painter().rect_filled(rect, radius(4), FIELD());
+                ui.painter().rect_stroke(rect, radius(4), Stroke::new(1.0, BORDER()), egui::StrokeKind::Inside);
+            }
             crate::icons::paint(ui, "magnify", egui::Rect::from_center_size(egui::pos2(rect.left() + 15.0, rect.center().y), vec2(14.0, 14.0)), MUTED());
             let mut child = ui.new_child(egui::UiBuilder::new().max_rect(egui::Rect::from_min_max(egui::pos2(rect.left() + 28.0, rect.top()), rect.max)));
             child.add_sized(
-                [w - 34.0, 30.0],
+                [w - 34.0, rect.height()],
                 egui::TextEdit::singleline(&mut self.nav_query).hint_text("Search").frame(egui::Frame::NONE).vertical_align(egui::Align::Center).margin(egui::Margin::symmetric(0, 0)),
             );
         });
@@ -353,6 +357,10 @@ impl App {
             if !query.is_empty() {
                 items.sort_by_key(|i| !i.name.to_lowercase().contains(&query));
             }
+            // Expressive: the selected page is marked by one tonal pill that springs from item to item; its shape
+            // goes in now (under the items) and is filled in after them, when its place is known
+            let mut sel_rect: Option<egui::Rect> = None;
+            let pill_slot = ui.painter().add(egui::Shape::Noop);
             for item in items {
                 if item.advanced_only && !self.advanced {
                     continue;
@@ -374,25 +382,42 @@ impl App {
                     ui.add_space(2.0);
                 }
                 let selected = self.page == item.page;
-                let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), 32.0), Sense::click());
+                let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), if expressive() { 40.0 } else { 32.0 }), Sense::click());
+                if selected {
+                    sel_rect = Some(rect.shrink2(vec2(2.0, 0.0)));
+                }
                 let id = resp.id;
                 let sel = tween(ui.ctx(), id.with("sel"), if selected { 1.0 } else { 0.0 }, 0.14);
                 let hov = tween(ui.ctx(), id.with("hov"), if resp.hovered() { 1.0 } else { 0.0 }, 0.1);
                 let inner = rect.shrink2(vec2(2.0, 0.0));
                 let p = ui.painter();
-                p.rect_filled(inner, radius(8), lerp_color(Color32::TRANSPARENT, CARD_HOVER(), (sel + hov * 0.6).min(1.0)));
-                crate::icons::paint(ui, item.icon, egui::Rect::from_center_size(egui::pos2(inner.left() + 20.0, inner.center().y), vec2(16.0, 16.0)), lerp_color(MUTED(), TEXT(), sel));
+                let (on_fg, base) = if expressive() { (ON_CONTAINER(), Color32::TRANSPARENT) } else { (TEXT(), Color32::TRANSPARENT) };
+                if expressive() {
+                    // the selected one is marked by the moving pill below; hover gets a soft tint
+                    p.rect_filled(inner, inner.height() / 2.0, lerp_color(base, CARD_HOVER(), hov * 0.7 * (1.0 - sel)));
+                } else {
+                    p.rect_filled(inner, radius(8), lerp_color(base, CARD_HOVER(), (sel + hov * 0.6).min(1.0)));
+                }
+                crate::icons::paint(ui, item.icon, egui::Rect::from_center_size(egui::pos2(inner.left() + 20.0, inner.center().y), vec2(16.0, 16.0)), lerp_color(MUTED(), on_fg, sel));
                 ui.painter().text(
                     egui::pos2(inner.left() + 38.0, inner.center().y),
                     Align2::LEFT_CENTER,
                     item.name,
                     egui::FontId::proportional(14.5),
-                    lerp_color(lerp_color(MUTED(), TEXT(), 0.55), TEXT(), sel),
+                    lerp_color(lerp_color(MUTED(), TEXT(), 0.55), on_fg, sel),
                 );
                 if resp.clicked() {
                     self.go(item.page);
                 }
                 resp.on_hover_cursor(egui::CursorIcon::PointingHand);
+            }
+            if let (true, Some(r)) = (expressive(), sel_rect) {
+                let id = ui.make_persistent_id("nav-pill");
+                let y = spring(ui.ctx(), id, r.top());
+                // a little longer while it travels, like a drop of liquid
+                let speed = (y - r.top()).abs().min(24.0);
+                let pill = egui::Rect::from_min_size(egui::pos2(r.left(), y), vec2(r.width(), r.height() + speed * 0.5));
+                ui.painter().set(pill_slot, egui::Shape::rect_filled(pill, pill.height().min(r.height()) / 2.0, CONTAINER()));
             }
         });
 

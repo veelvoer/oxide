@@ -8,8 +8,8 @@ PanelWindow {
     required property var shell      // the ShellRoot: modules use it to open popups
 
     readonly property bool top: BarConfig.position !== "bottom"
-    readonly property bool floating: BarConfig.style === "floating"
-    readonly property bool flat: BarConfig.style === "flat"
+    readonly property bool floating: BarConfig.look === "floating"
+    readonly property bool flat: BarConfig.look === "flat"
     readonly property bool pill: floating || BarConfig.lanes === "pill"
 
     anchors { left: true; right: true; top: top; bottom: !top }
@@ -35,12 +35,21 @@ PanelWindow {
         }
     }
 
-    LanePill { target: left }
-    LanePill { target: center }
-    LanePill { target: right }
+    // Expressive: the islands drop in one after another when the bar appears
+    property real arrive: 0
+    Component.onCompleted: arrive = 1
+    Behavior on arrive { NumberAnimation { duration: Theme.expressive ? 700 * Theme.motionScale : 0; easing.type: Easing.Linear } }
+    function drop(i) { return Theme.expressive ? Math.max(0, Math.min(1, arrive * 2.2 - i * 0.45)) : 1; }
+
+    LanePill { target: left; enter: win.drop(0) }
+    LanePill { target: center; enter: win.drop(1) }
+    LanePill { target: right; enter: win.drop(2) }
     Lane {
         id: left
         modules: BarConfig.left
+        readonly property real e: win.drop(0)
+        opacity: e
+        transform: Translate { y: (1 - left.e) * (win.top ? -14 : 14) }
         shell: win.shell
         window: win
         x: BarConfig.inset + (win.flat ? 10 : 8) + (win.pill ? 8 : 0)
@@ -49,6 +58,9 @@ PanelWindow {
     Lane {
         id: center
         modules: BarConfig.center
+        readonly property real e: win.drop(1)
+        opacity: e
+        transform: Translate { y: (1 - center.e) * (win.top ? -14 : 14) }
         shell: win.shell
         window: win
         anchors.centerIn: parent
@@ -56,6 +68,9 @@ PanelWindow {
     Lane {
         id: right
         modules: BarConfig.right
+        readonly property real e: win.drop(2)
+        opacity: e
+        transform: Translate { y: (1 - right.e) * (win.top ? -14 : 14) }
         shell: win.shell
         window: win
         anchors { right: parent.right; rightMargin: BarConfig.inset + (win.flat ? 10 : 8) + (win.pill ? 8 : 0); verticalCenter: parent.verticalCenter }

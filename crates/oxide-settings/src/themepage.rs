@@ -16,6 +16,26 @@ pub fn page(app: &mut App, ui: &mut Ui) {
     page_header(ui, "", "Theme", "Colors for the bar, launcher, panels and your terminal.");
     let before = app.cfg.theme.clone();
 
+    ui.add_space(10.0);
+    ui.label(RichText::new("STYLE").family(crate::theme::medium()).color(MUTED()).size(11.5).extra_letter_spacing(1.1));
+    ui.add_space(4.0);
+    let old_style = app.cfg.theme.style.clone();
+    style_cards(ui, &app.cfg.theme.clone(), &mut app.cfg.theme.style);
+    if app.cfg.theme.style != old_style {
+        // windows follow the style: big soft corners and springy motion for Expressive
+        if app.cfg.theme.style == "expressive" {
+            app.cfg.theme.roundness = app.cfg.theme.roundness.max(14);
+            app.cfg.decoration.rounding = app.cfg.decoration.rounding.max(20);
+            // room to breathe between windows and around the screen
+            app.cfg.general.gaps_in = app.cfg.general.gaps_in.max(10);
+            app.cfg.general.gaps_out = app.cfg.general.gaps_out.max(14);
+            app.cfg.animations = oxide_config::Animations::expressive();
+        } else {
+            app.cfg.decoration.rounding = (app.cfg.theme.roundness as f32 * 1.5).round() as i32;
+            app.cfg.animations = oxide_config::Animations::default();
+        }
+    }
+
     card(ui, "Appearance", |ui| {
         choice_row(
             ui,
@@ -247,5 +267,70 @@ fn photo_grid(ui: &mut Ui, current: &mut String) {
                 ui.add_space(gap);
             }
         });
+    });
+}
+
+/// The two styles as picture cards, each drawn in its own colors: a little bar, a card and a button.
+fn style_cards(ui: &mut Ui, theme: &oxide_config::theme::ThemeCfg, style: &mut String) {
+    use eframe::egui::{vec2, Pos2, Rect, Sense, Stroke};
+    let gap = 12.0;
+    let w = ((ui.available_width() - gap) / 2.0).floor();
+    let h = 176.0;
+    let hex = |s: &str| crate::widgets::parse_hex(s);
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = gap;
+        for (key, name, help) in [
+            ("oxide", "Oxide", "Flat and calm, crisp corners."),
+            ("expressive", "Material Expressive", "Tonal colors, big round shapes, springy motion."),
+        ] {
+            let pal = oxide_config::theme::palette(&oxide_config::theme::ThemeCfg { style: key.into(), ..theme.clone() });
+            let (rect, resp) = ui.allocate_exact_size(vec2(w, h), Sense::click());
+            if resp.clicked() {
+                *style = key.to_string();
+            }
+            let resp = resp.on_hover_cursor(eframe::egui::CursorIcon::PointingHand);
+            let sel = tween(ui.ctx(), resp.id, (style.as_str() == key) as u8 as f32, 0.18);
+            let hov = tween(ui.ctx(), resp.id.with("h"), resp.hovered() as u8 as f32, 0.12);
+            let p = ui.painter();
+            let r = radius(8);
+            p.rect_filled(rect, r, lerp_color(lerp_color(CARD(), CARD_HOVER(), hov), lerp_color(CARD(), ACCENT(), 0.10), sel));
+            p.rect_stroke(rect, r, Stroke::new(1.0 + sel, lerp_color(BORDER(), ACCENT(), sel)), eframe::egui::StrokeKind::Inside);
+            // the preview: a desktop in the style's own colors
+            let pic = Rect::from_min_max(rect.min + vec2(14.0, 14.0), Pos2::new(rect.right() - 14.0, rect.top() + 112.0));
+            let round = key == "expressive";
+            let rr = |v: f32| if round { v } else { (v * 0.35).round() };
+            p.rect_filled(pic, rr(14.0), hex(&pal.bg));
+            // bar: one strip, or floating pills
+            if round {
+                let y = pic.top() + 8.0;
+                for (x0, x1, c) in [(0.04, 0.30, &pal.surface_high), (0.38, 0.62, &pal.container), (0.70, 0.96, &pal.surface_high)] {
+                    let b = Rect::from_min_max(Pos2::new(eframe::egui::lerp(pic.left()..=pic.right(), x0), y), Pos2::new(eframe::egui::lerp(pic.left()..=pic.right(), x1), y + 14.0));
+                    p.rect_filled(b, 7.0, hex(c));
+                }
+                p.circle_filled(Pos2::new(eframe::egui::lerp(pic.left()..=pic.right(), 0.08), y + 7.0), 3.5, hex(&pal.accent));
+                p.rect_filled(Rect::from_min_size(Pos2::new(eframe::egui::lerp(pic.left()..=pic.right(), 0.12), y + 4.0), vec2(14.0, 6.0)), 3.0, hex(&pal.accent));
+            } else {
+                let b = Rect::from_min_max(pic.min, Pos2::new(pic.right(), pic.top() + 14.0));
+                p.rect_filled(b, eframe::egui::CornerRadius { nw: rr(14.0) as u8, ne: rr(14.0) as u8, sw: 0, se: 0 }, hex(&pal.surface));
+                p.rect_filled(Rect::from_min_size(b.min + vec2(8.0, 4.0), vec2(6.0, 6.0)), 1.0, hex(&pal.accent));
+            }
+            // a window with a card, a switch and a button inside
+            let win = Rect::from_min_max(Pos2::new(pic.left() + 10.0, pic.top() + 30.0), Pos2::new(pic.right() - 10.0, pic.bottom() - 8.0));
+            p.rect_filled(win, rr(16.0), hex(&pal.surface));
+            let line = |y: f32, wfrac: f32, c: &str| {
+                p.rect_filled(Rect::from_min_size(Pos2::new(win.left() + 10.0, win.top() + y), vec2((win.width() - 20.0) * wfrac, 5.0)), 2.5, hex(c));
+            };
+            line(12.0, 0.45, &pal.text);
+            line(24.0, 0.7, &pal.muted);
+            let btn = Rect::from_min_size(Pos2::new(win.left() + 10.0, win.bottom() - 24.0), vec2(56.0, 16.0));
+            p.rect_filled(btn, rr(8.0), hex(&pal.accent));
+            let tonal = Rect::from_min_size(Pos2::new(btn.right() + 6.0, btn.top()), vec2(46.0, 16.0));
+            p.rect_filled(tonal, rr(8.0), hex(&pal.container));
+            let sw = Rect::from_min_size(Pos2::new(win.right() - 40.0, win.top() + 10.0), vec2(28.0, 14.0));
+            p.rect_filled(sw, rr(7.0), hex(&pal.accent));
+            p.circle_filled(Pos2::new(sw.right() - 7.0, sw.center().y), if round { 5.0 } else { 4.0 }, hex(&pal.ink));
+            p.text(Pos2::new(rect.left() + 16.0, rect.top() + 126.0), eframe::egui::Align2::LEFT_TOP, name, eframe::egui::FontId::new(14.0, crate::theme::medium()), TEXT());
+            p.text(Pos2::new(rect.left() + 16.0, rect.top() + 148.0), eframe::egui::Align2::LEFT_TOP, help, eframe::egui::FontId::proportional(12.5), MUTED());
+        }
     });
 }

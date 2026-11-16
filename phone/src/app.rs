@@ -103,6 +103,8 @@ pub struct App {
     pair_error: Option<String>,
     /// per PC: None = offline; missing = not checked yet
     online: Arc<Mutex<HashMap<String, Option<Route>>>>,
+    /// PCs found at another local address (another network): remembered on the next frame
+    new_hosts: Arc<Mutex<HashMap<String, String>>>,
     last_probe: Instant,
     live: Option<Live>,
     toast: Option<(String, Instant)>,
@@ -195,6 +197,7 @@ impl App {
             pairing: None,
             pair_error: None,
             online: Default::default(),
+            new_hosts: Default::default(),
             last_probe: Instant::now() - Duration::from_secs(60),
             live: None,
             toast: None,
@@ -284,10 +287,14 @@ impl App {
         self.last_probe = Instant::now();
         for pc in self.store.pcs.clone() {
             let online = self.online.clone();
+            let new_hosts = self.new_hosts.clone();
             let ctx = self.ctx.clone();
             std::thread::spawn(move || {
                 let r = net::reachable(&pc);
-                online.lock().unwrap().insert(pc.id.clone(), r);
+                if let Some((_, Some(h))) = &r {
+                    new_hosts.lock().unwrap().insert(pc.id.clone(), h.clone());
+                }
+                online.lock().unwrap().insert(pc.id.clone(), r.map(|(route, _)| route));
                 ctx.request_repaint();
             });
         }
@@ -481,6 +488,16 @@ impl App {
 
     /// Network and phone events into state.
     fn poll(&mut self, ctx: &egui::Context) {
+        // a PC that is on another network now: remember where
+        let moved: Vec<(String, String)> = self.new_hosts.lock().unwrap().drain().collect();
+        if !moved.is_empty() {
+            for (id, host) in moved {
+                if let Some(pc) = self.store.pcs.iter_mut().find(|p| p.id == id) {
+                    pc.host = host;
+                }
+            }
+            self.store.save();
+        }
         if let Some(rx) = &self.scanning {
             if let Ok(found) = rx.try_recv() {
                 self.found = found;
@@ -528,7 +545,11 @@ impl App {
         let Some(l) = &mut self.live else { return };
         while let Ok(ev) = l.session.events.try_recv() {
             match ev {
-                Event::Connected { pc_name, route } => {
+                Event::Connected { pc_name, route, host } => {
+                    if let (Some(h), Some(pc)) = (host, pc_idx.and_then(|i| self.store.pcs.get_mut(i))) {
+                        pc.host = h;
+                        save_store = true;
+                    }
                     l.connected = Some(pc_name);
                     l.route = Some(route);
                     l.error = None;
@@ -537,8 +558,9 @@ impl App {
                 }
                 Event::Moved(w) | Event::Msg(ToPhone::Whereabouts(w)) => {
                     if let Some(pc) = pc_idx.and_then(|i| self.store.pcs.get_mut(i)) {
-                        if pc.remote != w.addrs || pc.rendezvous != w.rendezvous {
+                        if pc.remote != w.addrs || pc.rendezvous != w.rendezvous || pc.lan != w.lan {
                             pc.remote = w.addrs;
+                            pc.lan = w.lan;
                             pc.rendezvous = w.rendezvous;
                             save_store = true;
                         }
@@ -812,7 +834,7 @@ impl App {
                     });
                     ui.add_space(8.0);
                     ui.label(RichText::new(&pc.name).font(semibold(20.0)).color(p.text));
-                    let away = if pc.remote.is_empty() { "only at home".to_string() } else { format!("also away ({})", pc.remote.len()) };
+                    let away = if pc.remote.is_empty() { "on the same network".to_string() } else { "also over the internet".to_string() };
                     ui.label(RichText::new(format!("{}  ·  {away}", pc.host)).size(13.5).color(p.muted));
                     ui.add_space(8.0);
                     let mut item = |ui: &mut Ui, glyph: &str, text: &str, color: Color32, a: u8| {

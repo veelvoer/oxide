@@ -46,8 +46,9 @@ Item {
             readonly property bool occupied: modelData.windows > 0
             anchors.verticalCenter: parent ? parent.verticalCenter : undefined
             height: 26
-            width: root.kind === "numbers" ? 26 : root.kind === "dots" ? 12 : (current ? 26 : 14)
-            Behavior on width { NumberAnimation { duration: 220; easing.type: Easing.OutCubic } }
+            // Expressive: the current one is a wide pill, the others round
+            width: root.kind === "numbers" ? (Theme.expressive && current ? 42 : 26) : root.kind === "dots" ? (Theme.expressive && current ? 24 : 12) : (current ? 26 : 14)
+            Behavior on width { NumberAnimation { duration: Theme.spatial; easing.type: Theme.spatialType; easing.overshoot: Theme.overshoot } }
             // arriving workspaces pop in, leaving ones shrink away
             opacity: 0; scale: 0.6
             Component.onCompleted: { opacity = 1; scale = 1; }
@@ -59,7 +60,7 @@ Item {
                 visible: root.kind === "numbers"
                 anchors.fill: parent
                 radius: Theme.rControl
-                color: !ws.current && hover.hovered ? Theme.raised : Theme.clear(Theme.raised)
+                color: !ws.current && hover.hovered ? (Theme.expressive ? Theme.surfaceHighest : Theme.raised) : Theme.clear(Theme.raised)
                 Behavior on color { ColorAnimation { duration: Theme.fast } }
             }
             Txt {
@@ -100,12 +101,19 @@ Item {
         // numbers: a rounded square behind the digit; dots: a dot; bars: a bar
         x: root.cur ? root.cur.x + (root.cur.width - width) / 2 : 0
         y: root.cur ? root.cur.y + (root.cur.height - height) / 2 : 0
-        width: root.cur ? (root.kind === "numbers" ? root.cur.width : root.kind === "dots" ? 10 : root.cur.width) : 0
+        width: root.cur ? (root.kind === "numbers" ? root.cur.width : root.kind === "dots" ? (Theme.expressive ? root.cur.width - 2 : 10) : root.cur.width) : 0
         height: root.kind === "numbers" ? 26 : root.kind === "dots" ? 10 : 4
-        radius: root.kind === "numbers" ? Theme.rControl : height / 2
+        radius: root.kind === "numbers" ? Math.min(Theme.rControl, height / 2) : height / 2
         color: Theme.accent
-        Behavior on x { NumberAnimation { duration: 320; easing.type: Easing.OutBack; easing.overshoot: 0.9 } }
-        Behavior on width { NumberAnimation { duration: 260; easing.type: Easing.OutCubic } }
+        // Expressive: on the way it stretches toward where it goes, then snaps back to size (a liquid move)
+        property real lastX: x
+        property real stretch: 0
+        onXChanged: { stretch = Math.min(18, Math.abs(x - lastX) * 0.6); lastX = x; settle.restart(); }
+        Timer { id: settle; interval: 16; onTriggered: marker.stretch = 0 }
+        transform: Scale { origin.x: marker.width / 2; xScale: Theme.expressive ? 1 + marker.stretch / Math.max(1, marker.width) : 1 }
+        Behavior on stretch { NumberAnimation { duration: 180; easing.type: Easing.OutCubic } }
+        Behavior on x { NumberAnimation { duration: Theme.expressive ? 460 * Theme.motionScale : 320; easing.type: Easing.OutBack; easing.overshoot: Theme.expressive ? 1.3 : 0.9 } }
+        Behavior on width { NumberAnimation { duration: Theme.spatial; easing.type: Theme.spatialType; easing.overshoot: Theme.overshoot } }
     }
     WheelHandler { onWheel: e => OxideState.dispatch({ "type": "workspace_existing", "arg": e.angleDelta.y < 0 ? 1 : -1 }) }
 }

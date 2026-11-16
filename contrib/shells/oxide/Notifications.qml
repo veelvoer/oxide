@@ -81,13 +81,26 @@ Item {
                     width: col.width
                     height: inner.implicitHeight + 24
                     radius: Theme.rBox
-                    color: Theme.surface
-                    border.color: critical ? Theme.bad : Theme.line
-                    opacity: gone ? 0 : 1
-                    x: gone ? 40 : 0
+                    color: Theme.expressive ? Theme.surfaceHigh : Theme.surface
+                    border.color: critical ? Theme.bad : (Theme.expressive ? "transparent" : Theme.line)
+                    border.width: critical && Theme.expressive ? 2 : 1
+                    // swipe it away to the right; a short swipe springs back
+                    property real swipe: 0
+                    opacity: gone ? 0 : 1 - Math.min(0.7, Math.max(0, swipe) / 300)
+                    x: (gone ? (swipe > 0 ? width + 40 : 40) : 0) + (drag.active ? swipe : 0)
                     Behavior on opacity { NumberAnimation { duration: Theme.normal } }
-                    Behavior on x { NumberAnimation { duration: Theme.slow; easing.type: Easing.BezierSpline; easing.bezierCurve: Theme.curve } }
-                    Component.onCompleted: { x = 60; opacity = 0; x = 0; opacity = 1; }
+                    Behavior on x {
+                        enabled: !drag.active
+                        NumberAnimation { duration: Theme.expressive ? Theme.spatial : Theme.slow; easing.type: Theme.expressive ? Easing.OutBack : Easing.BezierSpline; easing.overshoot: 1.0; easing.bezierCurve: Theme.curve }
+                    }
+                    Component.onCompleted: { x = Theme.expressive ? 120 : 60; opacity = 0; x = 0; opacity = 1; }
+                    DragHandler {
+                        id: drag
+                        target: null
+                        xAxis.enabled: true; yAxis.enabled: false
+                        onTranslationChanged: toast.swipe = Math.max(-20, translation.x)
+                        onActiveChanged: if (!active) { if (toast.swipe > 90) toast.dismiss(); else toast.swipe = 0; }
+                    }
 
                     function dismiss() { gone = true; kill.start(); }
                     Timer { running: !toast.critical; interval: 7000; onTriggered: toast.dismiss() }

@@ -61,3 +61,23 @@ Changing the wallpaper cross-fades. The choice lives in `~/.config/oxide/wallpap
 `theme.json` has these keys (all `#rrggbb`): `bg surface raised line text muted accent accent_soft ink good warn bad
 blue`, plus `ansi` (16 terminal colors), `border` (gradient list), `border_inactive`, `light` (bool), `radius`.
 Own shells read the same file: see [SHELLS.md](SHELLS.md).
+
+## Material Expressive
+
+*Settings → Theme → Style → Material Expressive* changes the whole desktop at once, not just colors:
+
+* **Colors**: a Material 3 tonal scheme generated from your accent (or the wallpaper's color with *From wallpaper*):
+  surfaces in tinted steps, a vivid primary, tonal containers. Dark and light both work.
+* **Shape**: pill-shaped controls, big soft cards and panels (corners 14 to 24), floating island bar, gaps between
+  windows.
+* **Motion**: Material's spring curves. Panels grow out of the bar with a small overshoot, switches and buttons
+  squash while pressed and spring back, the workspace highlight stretches as it moves, the selected page in
+  Settings is one pill that springs between items, notifications spring in and can be swiped away.
+* **Cost**: the same GPU-friendly animations as before (position, scale, opacity, color), nothing is drawn
+  while idle. It adds no background work.
+
+Switching back to *Oxide* restores the flat look and the previous window rounding and animation preset. The phone app
+follows too (its *Colors* setting: Phone, My PC, Oxide).
+
+`[theme] style = "oxide" | "expressive"` in `oxide.toml`. Own shells receive the extra Material roles
+(`container`, `on_container`, `secondary_container`, `tertiary`, `surface_low`…, `outline`) and `style` in `theme.json`.

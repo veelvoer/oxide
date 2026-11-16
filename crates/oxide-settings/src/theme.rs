@@ -48,6 +48,23 @@ static PAL: RwLock<Pal> = RwLock::new(Pal {
 static STARTED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 fn initialized() -> bool { STARTED.swap(true, Ordering::Relaxed) }
 static ROUND: AtomicU8 = AtomicU8::new(8);
+static EXPRESSIVE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+static CONTAINER_COLORS: RwLock<(Color32, Color32)> = RwLock::new((Color32::from_rgb(90, 50, 35), Color32::from_rgb(255, 220, 200)));
+
+/// The Material Expressive style is on (pill controls, Material switches, springy presses).
+pub fn expressive() -> bool {
+    EXPRESSIVE.load(Ordering::Relaxed)
+}
+
+/// Tonal container color and the text on it (selected items, tonal buttons).
+#[allow(non_snake_case)]
+pub fn CONTAINER() -> Color32 {
+    CONTAINER_COLORS.read().unwrap().0
+}
+#[allow(non_snake_case)]
+pub fn ON_CONTAINER() -> Color32 {
+    CONTAINER_COLORS.read().unwrap().1
+}
 
 /// A theme change fades from the old colors to the new ones: (colors before, start of the fade).
 static FADE: RwLock<Option<(Pal, std::time::Instant)>> = RwLock::new(None);
@@ -177,6 +194,10 @@ pub fn set_theme(ctx: &Context, p: &oxide_config::theme::Palette) {
         };
     }
     ROUND.store(p.radius.min(24) as u8, Ordering::Relaxed);
+    EXPRESSIVE.store(p.style == "expressive", Ordering::Relaxed);
+    if !p.container.is_empty() {
+        *CONTAINER_COLORS.write().unwrap() = (hex(&p.container), hex(&p.on_container));
+    }
     apply(ctx);
 }
 
@@ -220,7 +241,8 @@ pub fn apply(ctx: &Context) {
     v.handle_shape = egui::style::HandleShape::Rect { aspect_ratio: 0.45 };
     let w = &mut v.widgets;
     for s in [&mut w.noninteractive, &mut w.inactive, &mut w.hovered, &mut w.active, &mut w.open] {
-        s.corner_radius = radius(4);
+        // Expressive: every button and field is a pill
+        s.corner_radius = if expressive() { egui::CornerRadius::same(255) } else { radius(4) };
     }
     w.noninteractive.bg_stroke = Stroke::new(1.0, BORDER());
     w.inactive.bg_fill = FIELD();
@@ -260,4 +282,27 @@ pub fn lerp_color(a: Color32, b: Color32, t: f32) -> Color32 {
 
 pub fn ease_out(t: f32) -> f32 {
     1.0 - (1.0 - t.clamp(0.0, 1.0)).powi(3)
+}
+
+/// A value that follows its target like a physical spring (Material 3 spatial spring: stiffness 380, damping ratio
+/// 0.8). Interruptible: a new target keeps the current speed. Returns the current value.
+pub fn spring(ctx: &Context, id: egui::Id, target: f32) -> f32 {
+    let dt = ctx.input(|i| i.stable_dt).clamp(0.0, 0.05);
+    let (mut x, mut v) = ctx.data(|d| d.get_temp::<(f32, f32)>(id)).unwrap_or((target, 0.0));
+    let (k, c) = (380.0, 31.2);
+    // a few small steps per frame keep it stable
+    for _ in 0..4 {
+        let h = dt / 4.0;
+        let a = -k * (x - target) - c * v;
+        v += a * h;
+        x += v * h;
+    }
+    if (x - target).abs() < 0.05 && v.abs() < 0.5 {
+        x = target;
+        v = 0.0;
+    } else {
+        ctx.request_repaint();
+    }
+    ctx.data_mut(|d| d.insert_temp(id, (x, v)));
+    x
 }

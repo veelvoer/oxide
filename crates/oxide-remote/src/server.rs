@@ -165,10 +165,7 @@ fn session(mut c: TcpStream, sh: Shared, phone_id: String, nonce: String) -> std
     let sender = Arc::new(Mutex::new(Sender { stream: c.try_clone()?, cipher: to_phone }));
     // where to find this PC away from home, for next time
     let r = sh.reach.lock().map(|r| r.clone()).unwrap_or_default();
-    if r.on && !r.addrs.is_empty() {
-        let w = Whereabouts { addrs: r.addrs, rendezvous: r.rendezvous, at: store::now() };
-        let _ = sender.lock().unwrap().json(&ToPhone::Whereabouts(w));
-    }
+    let _ = sender.lock().unwrap().json(&ToPhone::Whereabouts(r.whereabouts()));
     let streaming = Arc::new(AtomicBool::new(false));
     let acked = Arc::new(AtomicU64::new(0));
     let mut screen_output: Option<String> = None;

@@ -13,6 +13,8 @@ pub struct Pc {
     pub ltk: String,
     /// where the PC said it can be reached away from home ("host:port"), and the server with its notes
     pub remote: Vec<String>,
+    /// its addresses on the network it was on last ("192.168.x.y:port")
+    pub lan: Vec<String>,
     pub rendezvous: String,
     /// the PC's Oxide colors (for "Match my PC")
     pub palette: Vec<String>,

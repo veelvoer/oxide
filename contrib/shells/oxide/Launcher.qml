@@ -84,7 +84,7 @@ Pop {
         anchors.fill: parent
         radius: Theme.rPop
         color: Theme.surface
-        border.color: Theme.line
+        border.color: Theme.expressive ? "transparent" : Theme.line
 
         Rectangle {
             x: 14; y: 14
@@ -126,7 +126,16 @@ Pop {
             clip: true
             currentIndex: 0
             // one highlight that glides to the selected row
-            highlight: Rectangle { radius: Theme.rBox; color: Theme.alpha(Theme.accent, 0.2) }
+            // Expressive: a tonal pill that springs to the row (a hair past it, then back)
+            highlightFollowsCurrentItem: !Theme.expressive
+            highlight: Rectangle {
+                width: list.width
+                y: Theme.expressive && list.currentItem ? list.currentItem.y : y
+                height: Theme.expressive && list.currentItem ? list.currentItem.height : height
+                radius: Theme.expressive ? height / 2 : Theme.rBox
+                color: Theme.expressive ? Theme.secondaryContainer : Theme.alpha(Theme.accent, 0.2)
+                Behavior on y { enabled: Theme.expressive; NumberAnimation { duration: Theme.spatial; easing.type: Easing.OutBack; easing.overshoot: 1.1 } }
+            }
             highlightMoveDuration: 150
             highlightMoveVelocity: -1
             highlightResizeDuration: 150

@@ -26,6 +26,14 @@ pub struct Reach {
     pub addrs: Vec<String>,
     pub problem: Option<String>,
     pub rendezvous: String,
+    /// addresses on the network the PC is on now
+    pub lan: Vec<String>,
+}
+
+impl Reach {
+    pub fn whereabouts(&self) -> Whereabouts {
+        Whereabouts { addrs: self.addrs.clone(), lan: self.lan.clone(), rendezvous: self.rendezvous.clone(), at: store::now() }
+    }
 }
 
 #[derive(Clone)]
@@ -202,6 +210,24 @@ fn ipv6_global() -> Vec<String> {
     v
 }
 
+/// This PC's addresses on its local networks (not VPNs, containers or virtual machines).
+fn lan_v4() -> Vec<String> {
+    let Ok(out) = std::process::Command::new("ip").args(["-4", "-o", "addr", "show", "scope", "global"]).output() else { return vec![] };
+    String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .filter_map(|l| {
+            let mut w = l.split_whitespace();
+            let dev = w.nth(1)?;
+            if ["docker", "br-", "virbr", "veth", "tailscale", "zt", "tun", "wg", "lo"].iter().any(|p| dev.starts_with(p)) {
+                return None;
+            }
+            let a = l.split_whitespace().skip_while(|x| *x != "inet").nth(1)?;
+            let ip: Ipv4Addr = a.split('/').next()?.parse().ok()?;
+            ip.is_private().then(|| format!("{ip}:{TCP_PORT}"))
+        })
+        .collect()
+}
+
 fn vpn_v4() -> Vec<String> {
     // the addresses of VPN interfaces (Tailscale, ZeroTier use 100.64.0.0/10)
     let Ok(out) = std::process::Command::new("ip").args(["-4", "-o", "addr", "show"]).output() else { return vec![] };
@@ -239,61 +265,61 @@ pub fn start(reach: Arc<Mutex<Reach>>, store: Arc<Mutex<Store>>) {
         let mut phones = 0usize;
         loop {
             let cfg = oxide_config::Config::load().unwrap_or_default().remote;
+            let mut r = Reach { on: cfg.anywhere, rendezvous: cfg.rendezvous.clone(), ..Default::default() };
             if !cfg.anywhere {
                 if let (Some(g), Some(p)) = (&gateway, mapped.take()) {
                     delete_mapping(g, p);
                 }
-                *reach.lock().unwrap() = Reach { rendezvous: cfg.rendezvous.clone(), ..Default::default() };
-                std::thread::sleep(Duration::from_secs(15));
-                continue;
-            }
-            let mut r = Reach { on: true, rendezvous: cfg.rendezvous.clone(), ..Default::default() };
-            if last_router.elapsed() > Duration::from_secs(1800) || mapped.is_none() {
-                last_router = std::time::Instant::now();
-                if gateway.is_none() {
-                    gateway = discover_gateway();
-                }
-                match &gateway {
-                    Some(g) => match map_port(g, mapped) {
-                        Ok(p) => mapped = Some(p),
-                        Err(e) => {
-                            mapped = None;
-                            r.problem = Some(format!("The router did not forward the port ({e})."));
-                        }
-                    },
-                    None => r.problem = Some("No router answered (UPnP is off, or this network has none).".into()),
-                }
             } else {
-                let prev = reach.lock().unwrap().clone();
-                r.problem = prev.problem;
-            }
-            if let (Some(g), Some(p)) = (&gateway, mapped) {
-                match external_ip(g) {
-                    Some(ip) => {
-                        r.public_ip = Some(ip.to_string());
-                        r.upnp_port = Some(p);
-                        r.addrs.push(format!("{ip}:{p}"));
+                if last_router.elapsed() > Duration::from_secs(1800) || mapped.is_none() {
+                    last_router = std::time::Instant::now();
+                    if gateway.is_none() {
+                        gateway = discover_gateway();
                     }
-                    None if r.problem.is_none() => {
-                        r.problem = Some("The internet provider gives this network no public IPv4 address (CGNAT). IPv6 or a VPN like Tailscale can still work.".into())
+                    match &gateway {
+                        Some(g) => match map_port(g, mapped) {
+                            Ok(p) => mapped = Some(p),
+                            Err(e) => {
+                                mapped = None;
+                                r.problem = Some(format!("The router did not forward the port ({e})."));
+                            }
+                        },
+                        None => r.problem = Some("No router answered (UPnP is off, or this network has none).".into()),
                     }
-                    None => {}
+                } else {
+                    let prev = reach.lock().unwrap().clone();
+                    r.problem = prev.problem;
                 }
+                if let (Some(g), Some(p)) = (&gateway, mapped) {
+                    match external_ip(g) {
+                        Some(ip) => {
+                            r.public_ip = Some(ip.to_string());
+                            r.upnp_port = Some(p);
+                            r.addrs.push(format!("{ip}:{p}"));
+                        }
+                        None if r.problem.is_none() => {
+                            r.problem = Some("The internet provider gives this network no public IPv4 address (CGNAT). IPv6 or a VPN like Tailscale can still work.".into())
+                        }
+                        None => {}
+                    }
+                }
+                r.addrs.extend(ipv6_global());
             }
-            r.addrs.extend(ipv6_global());
             r.addrs.extend(vpn_v4());
+            r.lan = lan_v4();
             *reach.lock().unwrap() = r.clone();
-            // a note when the addresses change, for a new phone, and twice a day (ntfy keeps notes for 12 hours)
+            // a note when the addresses change (another network), for a new phone, and twice a day (ntfy keeps
+            // notes for 12 hours)
             let st = store.lock().map(|s| s.clone()).unwrap_or_default();
-            let mut sorted = r.addrs.clone();
+            let mut sorted: Vec<String> = r.addrs.iter().chain(&r.lan).cloned().collect();
             sorted.sort();
-            if !sorted.is_empty() && (sorted != last_note.0 || st.phones.len() != phones || store::now() - last_note.1 > 6 * 3600) {
-                let w = Whereabouts { addrs: r.addrs.clone(), rendezvous: cfg.rendezvous.clone(), at: store::now() };
-                post_notes(&cfg.rendezvous, &st, &w);
+            let due = sorted != last_note.0 || st.phones.len() != phones || store::now() - last_note.1 > 6 * 3600;
+            if cfg.notes && !st.phones.is_empty() && !sorted.is_empty() && due {
+                post_notes(&cfg.rendezvous, &st, &r.whereabouts());
                 last_note = (sorted, store::now());
                 phones = st.phones.len();
             }
-            std::thread::sleep(Duration::from_secs(60));
+            std::thread::sleep(Duration::from_secs(if cfg.anywhere { 60 } else { 30 }));
         }
     });
 }

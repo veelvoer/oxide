@@ -128,7 +128,10 @@ pub fn button_sized(ui: &mut Ui, kind: Kind, glyph: Option<&str>, text: &str, wi
     let (rect, resp) = ui.allocate_exact_size(vec2(w, height), Sense::click());
     let enabled = ui.is_enabled();
     let alpha = if enabled { 1.0 } else { 0.38 };
-    let radius = height / 2.0;
+    // Expressive: pressing morphs the pill into a rounded square and back
+    let press = ui.ctx().animate_bool_with_time(resp.id.with("morph"), resp.is_pointer_button_down_on(), 0.14);
+    let radius = egui::lerp(height / 2.0..=14.0, press);
+    let rect = rect.shrink2(vec2(press * 2.0, press * 1.0));
     if fill != Color32::TRANSPARENT {
         ui.painter().rect_filled(rect, radius, fill.gamma_multiply(alpha));
     }
@@ -265,7 +268,9 @@ pub fn nav_bar(ui: &mut Ui, items: &[(&str, &str)], selected: usize, bottom_inse
         let resp = ui.interact(cell, ui.scope_id().with(("nav", i)), Sense::click());
         let on = i == selected;
         let t = ui.ctx().animate_bool_with_time(ui.scope_id().with(("nav-on", i)), on, 0.18);
-        let pill = Rect::from_center_size(Pos2::new(cell.center().x, cell.top() + 26.0), vec2(36.0 + 28.0 * t, 32.0));
+        // overshoots a little on the way in (eased spring)
+        let o = { let x = t; 1.0 + 2.2 * (x - 1.0).powi(3) + 1.2 * (x - 1.0).powi(2) };
+        let pill = Rect::from_center_size(Pos2::new(cell.center().x, cell.top() + 26.0), vec2(36.0 + 28.0 * o.max(0.0), 32.0));
         if t > 0.0 {
             ui.painter().rect_filled(pill, 16.0, p.container.gamma_multiply(t));
         }

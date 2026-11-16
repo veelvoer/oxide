@@ -165,6 +165,7 @@ fn presets() -> Vec<(&'static str, &'static str, Animations)> {
         ("Smooth", "Gentle easing, no overshoot.", preset_smooth()),
         ("Snappy", "Quick and direct.", preset_snappy()),
         ("Bouncy", "Playful and springy.", preset_bouncy()),
+        ("Expressive", "Material 3 Expressive springs: lively moves, calm fades.", Animations::expressive()),
         ("Off", "No animations at all.", Animations { enabled: false, ..Animations::default() }),
     ]
 }

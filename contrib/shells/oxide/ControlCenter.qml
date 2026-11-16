@@ -44,7 +44,7 @@ Pop {
         anchors.fill: parent
         radius: Theme.rPop
         color: Theme.surface
-        border.color: Theme.line
+        border.color: Theme.expressive ? "transparent" : Theme.line
 
         Column {
             id: body
@@ -69,19 +69,30 @@ Pop {
                     signal clicked()
                     signal toggled()
                     width: (body.width - 8) / 2
-                    height: 84
-                    radius: Theme.rBox
-                    color: tm.containsMouse ? Theme.line : Theme.raised
-                    border.color: open ? Theme.alpha(Theme.accent, 0.6) : Theme.alpha(Theme.line, 0.6)
-                    Behavior on color { ColorAnimation { duration: Theme.fast } }
+                    height: Theme.expressive ? 72 : 84
+                    // Expressive: an on tile fills with the container color and turns squarer; pressing squishes it
+                    radius: !Theme.expressive ? Theme.rBox : (tm.pressed || dm.pressed) ? 14 : tile.on ? 20 : 32
+                    scale: Theme.expressive && (tm.pressed || dm.pressed) ? 0.96 : 1
+                    color: Theme.expressive ? (tile.on ? (tm.containsMouse ? Qt.tint(Theme.container, Theme.alpha(Theme.onContainer, 0.08)) : Theme.container)
+                                                       : (tm.containsMouse ? Theme.surfaceHighest : Theme.surfaceHigh))
+                         : (tm.containsMouse ? Theme.line : Theme.raised)
+                    border.color: Theme.expressive ? (open ? Theme.accent : "transparent") : (open ? Theme.alpha(Theme.accent, 0.6) : Theme.alpha(Theme.line, 0.6))
+                    border.width: Theme.expressive && open ? 2 : 1
+                    Behavior on color { ColorAnimation { duration: Theme.normal } }
                     Behavior on border.color { ColorAnimation { duration: Theme.fast } }
+                    Behavior on radius { NumberAnimation { duration: Theme.spatial; easing.type: Easing.OutBack; easing.overshoot: 1.4 } }
+                    Behavior on scale { NumberAnimation { duration: Theme.normal; easing.type: Easing.OutBack; easing.overshoot: 2.0 } }
                     MouseArea { id: tm; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor; onClicked: tile.clicked() }
                     // the round icon is the switch (on = accent); the rest of the tile opens its list
                     Rectangle {
                         id: dot
-                        x: 12; y: 10
-                        width: 30; height: 30; radius: 15
-                        color: tile.on ? Theme.accent : Theme.surface
+                        // Expressive: icon on the left, text beside it; otherwise icon on top, text below
+                        x: Theme.expressive ? 14 : 12
+                        y: Theme.expressive ? (tile.height - height) / 2 : 10
+                        width: Theme.expressive ? 36 : 30; height: width
+                        radius: Theme.expressive && tile.on ? 12 : width / 2
+                        Behavior on radius { NumberAnimation { duration: Theme.spatial; easing.type: Easing.OutBack; easing.overshoot: 1.4 } }
+                        color: tile.on ? Theme.accent : (Theme.expressive ? Theme.surfaceHighest : Theme.surface)
                         Behavior on color { ColorAnimation { duration: Theme.normal } }
                         scale: dm.pressed ? 0.92 : 1
                         Behavior on scale { NumberAnimation { duration: Theme.fast; easing.type: Easing.OutCubic } }
@@ -90,17 +101,18 @@ Pop {
                     }
                     Icon {
                         visible: tile.switchable
-                        anchors { right: parent.right; rightMargin: 12; top: parent.top; topMargin: 14 }
+                        anchors { right: parent.right; rightMargin: 12; top: Theme.expressive ? undefined : parent.top; topMargin: 14; verticalCenter: Theme.expressive ? parent.verticalCenter : undefined }
                         name: "chevron-down"; size: 16; color: Theme.muted
                         rotation: tile.open ? 180 : 0
                         Behavior on rotation { NumberAnimation { duration: Theme.normal; easing.type: Easing.OutCubic } }
                     }
                     Column {
-                        x: 14; anchors { bottom: parent.bottom; bottomMargin: 10 }
-                        width: parent.width - 28
+                        x: Theme.expressive ? dot.x + dot.width + 12 : 14
+                        y: Theme.expressive ? (tile.height - height) / 2 : tile.height - height - 10
+                        width: parent.width - x - (Theme.expressive && tile.switchable ? 34 : 14)
                         spacing: 0
-                        Txt { width: parent.width; elide: Text.ElideRight; text: tile.title; font { pixelSize: 14; weight: Font.DemiBold } }
-                        Txt { width: parent.width; elide: Text.ElideRight; text: tile.sub; color: Theme.muted; font.pixelSize: 12 }
+                        Txt { width: parent.width; elide: Text.ElideRight; text: tile.title; color: Theme.expressive && tile.on ? Theme.onContainer : Theme.text; font { pixelSize: 14; weight: Font.DemiBold } }
+                        Txt { width: parent.width; elide: Text.ElideRight; text: tile.sub; color: Theme.expressive && tile.on ? Theme.alpha(Theme.onContainer, 0.75) : Theme.muted; font.pixelSize: 12 }
                     }
                 }
 
@@ -311,9 +323,13 @@ Pop {
                     property bool armed: root.confirm === label
                     width: (body.width - 24) / 4
                     height: 52
-                    radius: Theme.rBox
-                    color: armed ? Theme.bad : (pm.containsMouse ? Theme.raised : Theme.alpha(Theme.text, 0.06))
+                    radius: Theme.expressive ? (pm.pressed ? 12 : height / 2) : Theme.rBox
+                    scale: Theme.expressive && pm.pressed ? 0.94 : 1
+                    color: armed ? Theme.bad : Theme.expressive ? (pm.containsMouse ? Theme.surfaceHighest : Theme.surfaceHigh)
+                                                            : (pm.containsMouse ? Theme.raised : Theme.alpha(Theme.text, 0.06))
                     Behavior on color { ColorAnimation { duration: Theme.fast } }
+                    Behavior on radius { NumberAnimation { duration: Theme.normal; easing.type: Easing.OutBack; easing.overshoot: 1.6 } }
+                    Behavior on scale { NumberAnimation { duration: Theme.normal; easing.type: Easing.OutBack; easing.overshoot: 2.0 } }
                     Column {
                         anchors.centerIn: parent
                         spacing: 2

@@ -21,11 +21,14 @@ pub struct ThemeCfg {
     pub roundness: u32,
     /// Also recolor GTK and Qt apps (color scheme, accent, window colors).
     pub apps: bool,
+    /// "oxide" (flat and calm) or "expressive" (Material 3 Expressive: tonal colors, big round shapes, springy
+    /// motion) for the whole desktop: shell, settings, windows, terminal and apps.
+    pub style: String,
 }
 
 impl Default for ThemeCfg {
     fn default() -> Self {
-        Self { preset: "oxide".into(), accent: None, kitty: true, mode: "dark".into(), roundness: 8, apps: true }
+        Self { preset: "oxide".into(), accent: None, kitty: true, mode: "dark".into(), roundness: 8, apps: true, style: "oxide".into() }
     }
 }
 
@@ -51,6 +54,18 @@ pub struct Palette {
     pub border_inactive: String,
     pub light: bool,
     pub radius: u32,
+    /// "oxide" or "expressive"
+    pub style: String,
+    /// Material roles (also filled for the Oxide presets, derived from their colors)
+    pub container: String,
+    pub on_container: String,
+    pub secondary_container: String,
+    pub on_secondary_container: String,
+    pub tertiary: String,
+    pub surface_low: String,
+    pub surface_high: String,
+    pub surface_highest: String,
+    pub outline: String,
 }
 
 fn s(v: &str) -> String {
@@ -83,6 +98,16 @@ fn pal(name: &str, c: [&str; 13], ansi: [&str; 16], border: &[&str], border_inac
         border_inactive: s(border_inactive),
         light: false,
         radius: 8,
+        style: s("oxide"),
+        container: String::new(),
+        on_container: String::new(),
+        secondary_container: String::new(),
+        on_secondary_container: String::new(),
+        tertiary: String::new(),
+        surface_low: String::new(),
+        surface_high: String::new(),
+        surface_highest: String::new(),
+        outline: String::new(),
     }
 }
 
@@ -240,7 +265,65 @@ pub fn palette(cfg: &ThemeCfg) -> Palette {
         p.border = vec![p.accent.clone(), p.accent_soft.clone()];
     }
     p.radius = cfg.roundness.min(24);
+    if cfg.style == "expressive" {
+        expressive(&mut p, cfg);
+    } else {
+        derive_roles(&mut p);
+    }
     p
+}
+
+fn mix(a: &str, b: &str, t: f32) -> String {
+    match (parse_hex(a), parse_hex(b)) {
+        (Some(x), Some(y)) => to_hex([x[0] + (y[0] - x[0]) * t, x[1] + (y[1] - x[1]) * t, x[2] + (y[2] - x[2]) * t]),
+        _ => a.to_string(),
+    }
+}
+
+/// The Material roles for an Oxide preset, from its own colors.
+fn derive_roles(p: &mut Palette) {
+    p.style = "oxide".into();
+    p.container = mix(&p.surface, &p.accent, 0.28);
+    p.on_container = p.text.clone();
+    p.secondary_container = mix(&p.surface, &p.accent_soft, 0.14);
+    p.on_secondary_container = p.text.clone();
+    p.tertiary = p.blue.clone();
+    p.surface_low = mix(&p.bg, &p.surface, 0.5);
+    p.surface_high = p.raised.clone();
+    p.surface_highest = mix(&p.raised, &p.text, 0.06);
+    p.outline = mix(&p.line, &p.muted, 0.5);
+}
+
+/// Material Expressive: a tonal scheme from the accent (or the wallpaper's color), big shapes.
+fn expressive(p: &mut Palette, cfg: &ThemeCfg) {
+    let seed = crate::material::parse(&p.accent).unwrap_or([212, 87, 46]);
+    let m = crate::material::scheme(seed, p.light);
+    p.style = "expressive".into();
+    p.bg = m.surface.clone();
+    p.surface = m.surface_container.clone();
+    p.raised = m.surface_high.clone();
+    p.line = m.outline_variant.clone();
+    p.text = m.on_surface.clone();
+    p.muted = m.on_surface_variant.clone();
+    p.accent = m.primary.clone();
+    p.accent_soft = m.tertiary.clone();
+    p.ink = m.on_primary.clone();
+    p.good = m.good.clone();
+    p.warn = m.warn.clone();
+    p.bad = m.error.clone();
+    p.container = m.primary_container;
+    p.on_container = m.on_primary_container;
+    p.secondary_container = m.secondary_container;
+    p.on_secondary_container = m.on_secondary_container;
+    p.tertiary = m.tertiary;
+    p.surface_low = m.surface_low;
+    p.surface_high = m.surface_high;
+    p.surface_highest = m.surface_highest;
+    p.outline = m.outline;
+    p.border = vec![p.accent.clone(), p.accent_soft.clone()];
+    p.border_inactive = format!("{}aa", m.outline_variant);
+    // Expressive shapes are big and soft
+    p.radius = cfg.roundness.clamp(14, 24);
 }
 
 fn config_dir() -> PathBuf {

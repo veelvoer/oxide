@@ -102,6 +102,8 @@ pub enum ToPhone {
 pub struct Whereabouts {
     /// "host:port" or "[v6]:port"
     pub addrs: Vec<String>,
+    /// the PC's addresses on the network it is on now (for when the phone is on that network too)
+    pub lan: Vec<String>,
     pub rendezvous: String,
     pub at: u64,
 }

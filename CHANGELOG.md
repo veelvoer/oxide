@@ -2,6 +2,9 @@
 
 ## 0.2.0 (unreleased)
 
+* New: **Material Expressive** style for the whole desktop and the phone app (Settings → Theme → Style).
+* New: phone app finds a PC again on any network it moves to; encrypted notes work without port forwarding.
+* Fixed: sliders in Settings (clean thick track, solid handle, nothing past the handle), the border color bar has rounded ends.
 * New: **automatic updates** from the git repository (`oxide-ctl update`), with an "Oxide was updated" card
   after the next login; Settings → Config → Updates.
 * New: the phone app reaches the PC **away from home** (UPnP, IPv6, VPN addresses, encrypted notes on ntfy),

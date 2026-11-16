@@ -20,7 +20,7 @@ Pop {
         anchors.fill: parent
         radius: Theme.rPop
         color: Theme.surface
-        border.color: Theme.line
+        border.color: Theme.expressive ? "transparent" : Theme.line
 
         Item {
             id: head

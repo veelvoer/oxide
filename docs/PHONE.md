@@ -42,6 +42,15 @@ adb install OxideRemote-*.apk
 `scripts/release.sh` builds it and publishes it as a GitHub release, where the app's **Update** button finds it.
 An update installs only over an app signed with the same key, so keep the key you build with.
 
+## Other networks (school, work, a friend's)
+
+The phone remembers each PC for good. When a PC is not at its last address (it is on another network, or got a new
+address), the app looks for it by its id on the network the phone is on, tries the local addresses it was last
+seen with, and reads the PC's encrypted note on ntfy for where it is now. The home screen shows the PC as
+online and the saved address is updated. *Settings → Phone → Find this PC on any network* (on by default) controls the
+note; it needs no port forwarding. Networks that isolate devices from each other (some schools) can still block it:
+then use *Reach this PC from anywhere* or Tailscale.
+
 ## Away from home
 
 *Settings → Phone → Reach this PC from anywhere* (off by default):

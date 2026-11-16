@@ -14,7 +14,7 @@ Pop {
         anchors.fill: parent
         radius: Theme.rPop
         color: Theme.surface
-        border.color: Theme.line
+        border.color: Theme.expressive ? "transparent" : Theme.line
 
         Txt { x: 16; y: 16; text: "Notifications"; color: Theme.text; font { pixelSize: 15; weight: Font.DemiBold } }
         Row {

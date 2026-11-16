@@ -153,6 +153,9 @@ pub fn row_sub(ui: &mut Ui, icon: &str, name: &str, sub: &str, last: bool, contr
 
 /// Animated on/off switch.
 pub fn switch(ui: &mut Ui, on: &mut bool) -> egui::Response {
+    if expressive() {
+        return m3_switch(ui, on);
+    }
     // a full pill with a round knob, whatever the theme's roundness
     let size = vec2(40.0, 22.0);
     let (rect, mut resp) = ui.allocate_exact_size(size, Sense::click());
@@ -173,6 +176,49 @@ pub fn switch(ui: &mut Ui, on: &mut bool) -> egui::Response {
     ui.painter().circle_filled(Pos2::new(x, rect.center().y), r, lerp_color(TEXT(), ON_ACCENT(), t));
     if resp.has_focus() {
         ui.painter().rect_stroke(rect.expand(2.0), pill + 2.0, Stroke::new(1.5, ACCENT()), egui::StrokeKind::Outside);
+    }
+    resp.on_hover_cursor(egui::CursorIcon::PointingHand)
+}
+
+/// The Material 3 switch: an outlined track with a small knob when off; on, the knob grows and shows a check;
+/// pressing makes it bigger still. The knob springs a little past its place.
+fn m3_switch(ui: &mut Ui, on: &mut bool) -> egui::Response {
+    let (rect, mut resp) = ui.allocate_exact_size(vec2(52.0, 32.0), Sense::click());
+    if resp.clicked() {
+        *on = !*on;
+        resp.mark_changed();
+    }
+    let t = tween(ui.ctx(), resp.id, if *on { 1.0 } else { 0.0 }, 0.16);
+    let pressed = resp.is_pointer_button_down_on();
+    let target = if pressed { 28.0 } else if *on { 24.0 } else { 16.0 };
+    let size = ui.ctx().animate_value_with_time(resp.id.with("knob"), target, 0.14);
+    let p = ui.painter();
+    let pill = rect.height() / 2.0;
+    let track = lerp_color(lerp_color(FIELD(), TEXT(), if resp.hovered() { 0.06 } else { 0.0 }), ACCENT(), t);
+    p.rect_filled(rect, pill, track);
+    if t < 0.99 {
+        p.rect_stroke(rect, pill, Stroke::new(2.0, lerp_color(lerp_color(BORDER(), MUTED(), 0.6), ACCENT(), t)), egui::StrokeKind::Inside);
+    }
+    // a slight overshoot on the way: an eased spring
+    let s = {
+        let x = t;
+        let c = 1.6;
+        1.0 + (c + 1.0) * (x - 1.0).powi(3) + c * (x - 1.0).powi(2)
+    };
+    let left = rect.left() + pill;
+    let right = rect.right() - pill;
+    let cx = left + (right - left) * s;
+    let c = Pos2::new(cx, rect.center().y);
+    p.circle_filled(c, size / 2.0, lerp_color(lerp_color(BORDER(), MUTED(), 0.8), ON_ACCENT(), t));
+    if t > 0.5 {
+        // the check, drawn
+        let a = (t - 0.5) * 2.0;
+        let k = 4.0 * a;
+        let pts = vec![Pos2::new(c.x - k, c.y), Pos2::new(c.x - k * 0.3, c.y + k * 0.7), Pos2::new(c.x + k, c.y - k * 0.7)];
+        p.add(egui::Shape::line(pts, Stroke::new(2.0, ACCENT())));
+    }
+    if resp.has_focus() {
+        p.rect_stroke(rect.expand(2.0), pill + 2.0, Stroke::new(1.5, ACCENT()), egui::StrokeKind::Outside);
     }
     resp.on_hover_cursor(egui::CursorIcon::PointingHand)
 }
@@ -198,8 +244,73 @@ pub fn slider_row<N: egui::emath::Numeric>(
         ui.visuals_mut().widgets.inactive.bg_fill = DEEP();
         ui.visuals_mut().widgets.hovered.weak_bg_fill = DEEP();
         ui.style_mut().text_styles.insert(egui::TextStyle::Button, egui::FontId::monospace(13.0));
-        ui.add(egui::Slider::new(value, range).suffix(suffix.to_string()).trailing_fill(true));
+        // right to left: the track, then the number before it
+        track(ui, value, range.clone(), 200.0);
+        number(ui, value, range, suffix);
     });
+}
+
+/// The number next to a slider: drag it or type into it.
+fn number<N: egui::emath::Numeric>(ui: &mut Ui, value: &mut N, range: std::ops::RangeInclusive<N>, suffix: &str) -> egui::Response {
+    let (lo, hi) = (range.start().to_f64(), range.end().to_f64());
+    let mut d = egui::DragValue::new(value).range(range).suffix(suffix.to_string()).speed((hi - lo) / 300.0);
+    if !N::INTEGRAL && hi - lo <= 2.0 {
+        d = d.fixed_decimals(2);
+    }
+    ui.add(d)
+}
+
+/// A slider track in the Material 3 expressive style: a thick rounded track that stops with a small gap on both
+/// sides of a solid vertical handle, so nothing shows past or through the handle.
+pub fn track<N: egui::emath::Numeric>(ui: &mut Ui, value: &mut N, range: std::ops::RangeInclusive<N>, width: f32) -> egui::Response {
+    let (lo, hi) = (range.start().to_f64(), range.end().to_f64());
+    let (rect, mut resp) = ui.allocate_exact_size(vec2(width, 28.0), Sense::click_and_drag());
+    let inner = rect.shrink2(vec2(3.0, 0.0));
+    if let Some(p) = resp.interact_pointer_pos().filter(|_| resp.dragged() || resp.clicked() || resp.is_pointer_button_down_on()) {
+        let t = ((p.x - inner.left()) / inner.width()).clamp(0.0, 1.0) as f64;
+        let mut v = lo + t * (hi - lo);
+        if N::INTEGRAL {
+            v = v.round();
+        }
+        if (v - value.to_f64()).abs() > f64::EPSILON {
+            *value = N::from_f64(v);
+            resp.mark_changed();
+        }
+    }
+    if resp.has_focus() {
+        let step = if N::INTEGRAL { 1.0 } else { (hi - lo) / 100.0 };
+        let delta = ui.input(|i| (i.key_pressed(egui::Key::ArrowRight) as i32 - i.key_pressed(egui::Key::ArrowLeft) as i32) as f64);
+        if delta != 0.0 {
+            *value = N::from_f64((value.to_f64() + delta * step).clamp(lo, hi));
+            resp.mark_changed();
+        }
+    }
+    let t = if hi > lo { ((value.to_f64() - lo) / (hi - lo)).clamp(0.0, 1.0) as f32 } else { 0.0 };
+    let active = resp.dragged() || resp.is_pointer_button_down_on();
+    let grow = tween(ui.ctx(), resp.id.with("grip"), if active { 1.0 } else if resp.hovered() { 0.5 } else { 0.0 }, 0.12);
+    let x = inner.left() + inner.width() * t;
+    let cy = rect.center().y;
+    let th = 8.0;
+    let gap = 5.0;
+    let p = ui.painter();
+    // filled part up to the handle, the rest after it
+    if x - gap > inner.left() + 1.0 {
+        let a = Rect::from_min_max(Pos2::new(inner.left(), cy - th / 2.0), Pos2::new(x - gap, cy + th / 2.0));
+        p.rect_filled(a, egui::CornerRadius { nw: 4, sw: 4, ne: 2, se: 2 }, ACCENT());
+    }
+    if x + gap < inner.right() - 1.0 {
+        let b = Rect::from_min_max(Pos2::new(x + gap, cy - th / 2.0), Pos2::new(inner.right(), cy + th / 2.0));
+        p.rect_filled(b, egui::CornerRadius { nw: 2, sw: 2, ne: 4, se: 4 }, lerp_color(FIELD(), MUTED(), 0.35));
+        // the end stop
+        p.circle_filled(Pos2::new(inner.right() - 4.0, cy), 1.6, ACCENT().gamma_multiply(0.8));
+    }
+    let hw = 4.0 - grow * 1.0;
+    let hh = 24.0 + grow * 2.0;
+    p.rect_filled(Rect::from_center_size(Pos2::new(x, cy), vec2(hw, hh)), hw / 2.0, ACCENT());
+    if resp.has_focus() {
+        p.rect_stroke(rect.expand(2.0), 6.0, Stroke::new(1.5, ACCENT().gamma_multiply(0.6)), egui::StrokeKind::Outside);
+    }
+    resp.on_hover_cursor(egui::CursorIcon::PointingHand)
 }
 
 pub fn text_row(ui: &mut Ui, name: &str, help: &str, last: bool, value: &mut String, hint: &str) {
@@ -275,13 +386,33 @@ pub fn dot(ui: &mut Ui, color: Color32) {
 
 /// Subtle button used for secondary actions.
 pub fn ghost_button(ui: &mut Ui, label: &str) -> egui::Response {
+    if expressive() {
+        return m3_button(ui, label, CONTAINER(), ON_CONTAINER());
+    }
     ui.add(egui::Button::new(label).fill(Color32::TRANSPARENT).stroke(Stroke::new(1.0, BORDER())))
         .on_hover_cursor(egui::CursorIcon::PointingHand)
 }
 
 pub fn primary_button(ui: &mut Ui, label: &str) -> egui::Response {
+    if expressive() {
+        return m3_button(ui, label, ACCENT(), ON_ACCENT());
+    }
     ui.add(egui::Button::new(RichText::new(label).color(ON_ACCENT()).family(medium())).fill(ACCENT()))
         .on_hover_cursor(egui::CursorIcon::PointingHand)
+}
+
+/// Expressive button: a pill that squashes into a rounded square while pressed and springs back.
+fn m3_button(ui: &mut Ui, label: &str, fill: Color32, fg: Color32) -> egui::Response {
+    let galley = ui.painter().layout_no_wrap(label.to_string(), egui::FontId::new(14.0, medium()), fg);
+    let size = vec2(galley.size().x + 36.0, 36.0);
+    let (rect, resp) = ui.allocate_exact_size(size, Sense::click());
+    let press = ui.ctx().animate_bool_with_time(resp.id.with("press"), resp.is_pointer_button_down_on(), 0.12);
+    let hover = tween(ui.ctx(), resp.id.with("hover"), resp.hovered() as u8 as f32, 0.12);
+    let r = egui::lerp(rect.height() / 2.0..=9.0, press);
+    let shown = rect.shrink2(vec2(press * 3.0, press * 1.5));
+    ui.painter().rect_filled(shown, r, lerp_color(fill, fg, hover * 0.08 + press * 0.06));
+    ui.painter().galley(shown.center() - galley.size() / 2.0, galley, fg);
+    resp.on_hover_cursor(egui::CursorIcon::PointingHand)
 }
 
 #[allow(dead_code)]
@@ -304,11 +435,9 @@ pub fn signal_icon(ui: &mut Ui, percent: u8, color: Color32) {
 /// A horizontal strip showing a color gradient.
 pub fn gradient_strip(ui: &mut Ui, colors: &[Color32], height: f32) {
     let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), height), Sense::hover());
-    let n = 48;
-    let seg = rect.width() / n as f32;
-    for i in 0..n {
-        let t = i as f32 / (n - 1) as f32;
-        let c = match colors.len() {
+    let color_at = |x: f32| {
+        let t = ((x - rect.left()) / rect.width()).clamp(0.0, 1.0);
+        match colors.len() {
             0 => Color32::WHITE,
             1 => colors[0],
             len => {
@@ -316,11 +445,38 @@ pub fn gradient_strip(ui: &mut Ui, colors: &[Color32], height: f32) {
                 let k = (s.floor() as usize).min(len - 2);
                 lerp_color(colors[k], colors[k + 1], s - k as f32)
             }
-        };
-        let r = Rect::from_min_size(Pos2::new(rect.left() + i as f32 * seg, rect.top()), vec2(seg + 0.6, height));
-        ui.painter().rect_filled(r, radius(0), c);
+        }
+    };
+    let r = (height / 2.0).min(6.0);
+    // vertical strips in the gradient's colors, cut to the rounded shape at both ends
+    let mut strips = egui::Mesh::default();
+    // every half pixel along the rounded ends, coarser in between
+    let mut xs: Vec<f32> = vec![];
+    let mut x = rect.left();
+    while x < rect.right() {
+        xs.push(x);
+        x += if x < rect.left() + r || x > rect.right() - r - 8.0 { 0.5 } else { 8.0 };
     }
-    ui.painter().rect_stroke(rect, radius(4), Stroke::new(1.0, BORDER()), egui::StrokeKind::Inside);
+    xs.push(rect.right());
+    for (i, &x) in xs.iter().enumerate() {
+        let inset = if x < rect.left() + r {
+            r - (r * r - (rect.left() + r - x).powi(2)).max(0.0).sqrt()
+        } else if x > rect.right() - r {
+            r - (r * r - (x - (rect.right() - r)).powi(2)).max(0.0).sqrt()
+        } else {
+            0.0
+        };
+        let c = color_at(x);
+        strips.colored_vertex(Pos2::new(x, rect.top() + inset), c);
+        strips.colored_vertex(Pos2::new(x, rect.bottom() - inset), c);
+        if i > 0 {
+            let b = (i * 2) as u32;
+            strips.add_triangle(b - 2, b - 1, b);
+            strips.add_triangle(b - 1, b, b + 1);
+        }
+    }
+    ui.painter().add(egui::Shape::mesh(strips));
+    ui.painter().rect_stroke(rect, r, Stroke::new(1.0, BORDER()), egui::StrokeKind::Inside);
 }
 
 /// A slider row that reports when the user finished dragging (so commands run once, not per pixel).
@@ -336,8 +492,9 @@ pub fn commit_slider_row(
 ) -> Option<f32> {
     let mut committed = None;
     row(ui, name, help, last, |ui| {
-        let r = ui.add(egui::Slider::new(value, range).suffix(suffix.to_string()).fixed_decimals(0).trailing_fill(true));
-        if r.drag_stopped() || (r.changed() && !r.dragged() && !r.has_focus()) {
+        let t = track(ui, value, range.clone(), 200.0);
+        let n = number(ui, value, range, suffix);
+        if t.drag_stopped() || (t.changed() && !t.dragged()) || n.drag_stopped() || (n.changed() && !n.dragged() && !n.has_focus()) || n.lost_focus() {
             committed = Some(*value);
         }
     });
