@@ -18,7 +18,9 @@ use crate::{
 };
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
-const RELEASES: &str = "https://api.github.com/repos/veelvoer/oxide/releases?per_page=20";
+// the releases feed on the website: unlike the API it has no 60-requests-an-hour limit per address
+const RELEASES: &str = "https://github.com/veelvoer/oxide/releases.atom";
+const DOWNLOAD: &str = "https://github.com/veelvoer/oxide/releases/download";
 const SOURCE: &str = "https://github.com/veelvoer/oxide";
 
 #[derive(PartialEq, Clone, Copy)]
@@ -156,21 +158,14 @@ fn semver(v: &str) -> (u32, u32, u32) {
     (it.next().unwrap_or(0), it.next().unwrap_or(0), it.next().unwrap_or(0))
 }
 
-/// The newest OxideRemote-X.Y.Z.apk attached to a release.
-fn newest_apk(json: &str) -> Option<(String, String)> {
-    let releases: serde_json::Value = serde_json::from_str(json).ok()?;
+/// The newest phone release in the releases feed: tags are "phone-vX.Y.Z", the file "OxideRemote-X.Y.Z.apk".
+fn newest_apk(feed: &str) -> Option<(String, String)> {
     let mut best: Option<(String, String)> = None;
-    for r in releases.as_array()? {
-        if r["draft"].as_bool() == Some(true) {
-            continue;
-        }
-        for a in r["assets"].as_array().into_iter().flatten() {
-            let name = a["name"].as_str().unwrap_or("");
-            let Some(v) = name.strip_prefix("OxideRemote-").and_then(|n| n.strip_suffix(".apk")) else { continue };
-            let url = a["browser_download_url"].as_str().unwrap_or("").to_string();
-            if best.as_ref().is_none_or(|(b, _)| semver(v) > semver(b)) {
-                best = Some((v.to_string(), url));
-            }
+    for part in feed.split("/releases/tag/").skip(1) {
+        let tag: String = part.chars().take_while(|c| !matches!(c, '"' | '<' | '&' | ' ')).collect();
+        let Some(v) = tag.strip_prefix("phone-v") else { continue };
+        if best.as_ref().is_none_or(|(b, _)| semver(v) > semver(b)) {
+            best = Some((v.to_string(), format!("{DOWNLOAD}/{tag}/OxideRemote-{v}.apk")));
         }
     }
     best
@@ -259,7 +254,7 @@ impl App {
         std::thread::spawn(move || {
             let r = match platform::http_get(RELEASES) {
                 Some(json) => Ok(newest_apk(&json).filter(|(v, _)| semver(v) > semver(VERSION))),
-                None => Err("Could not reach GitHub.".to_string()),
+                None => Err("Could not reach GitHub. Check the connection and try again.".to_string()),
             };
             let _ = tx.send(r);
             ctx.request_repaint();
