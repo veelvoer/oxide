@@ -86,6 +86,30 @@ void main() {{
     )
 }
 
+/// A rounded rectangle: filled, or only its outline when `border` > 0 (overview tiles).
+fn fill_src() -> String {
+    format!(
+        "{PRECISION}
+varying vec2 v_coords;
+uniform vec2 size;
+uniform float alpha;
+uniform float radius;
+uniform float border;
+uniform vec4 color;
+{SD}
+void main() {{
+    vec2 p = v_coords * size - size * 0.5;
+    float d_out = sd_round_rect(p, size * 0.5, radius);
+    float a = clamp(0.5 - d_out, 0.0, 1.0);
+    if (border > 0.0) {{
+        float d_in = sd_round_rect(p, size * 0.5 - border, max(radius - border, 0.0));
+        a = a * (1.0 - clamp(0.5 - d_in, 0.0, 1.0));
+    }}
+    gl_FragColor = color * (a * alpha);
+}}"
+    )
+}
+
 fn shadow_src() -> String {
     format!(
         "{PRECISION}
@@ -240,6 +264,7 @@ pub struct BlurShaders {
 pub struct Shaders {
     pub border: GlesPixelProgram,
     pub shadow: GlesPixelProgram,
+    pub fill: GlesPixelProgram,
     pub clip: GlesTexProgram,
     pub blur: Option<BlurShaders>,
 }
@@ -260,6 +285,10 @@ impl Shaders {
             .compile_custom_pixel_shader(shadow_src(), &[v2("win_size"), f("radius"), f("range"), v4("color")])
             .map_err(|e| warn!("shadow shader: {e}"))
             .ok()?;
+        let fill = r
+            .compile_custom_pixel_shader(fill_src(), &[f("radius"), f("border"), v4("color")])
+            .map_err(|e| warn!("fill shader: {e}"))
+            .ok()?;
         let clip = r
             .compile_custom_texture_shader(clip_src(), &[v2("size"), v4("geo"), f("radius")])
             .map_err(|e| warn!("clip shader: {e}"))
@@ -277,7 +306,7 @@ impl Shaders {
         if blur.is_none() {
             warn!("blur shaders failed to compile; blur disabled");
         }
-        Some(Self { border, shadow, clip, blur })
+        Some(Self { border, shadow, fill, clip, blur })
     }
 }
 

@@ -11,7 +11,7 @@ use smithay::{
             utils::{Relocate, RelocateRenderElement, RescaleRenderElement},
             AsRenderElements, Element, Id, Kind,
         },
-        gles::GlesRenderer,
+        gles::{element::PixelShaderElement, GlesRenderer},
         utils::CommitCounter,
     },
     utils::{Logical, Physical, Point, Rectangle, Scale},
@@ -268,6 +268,49 @@ impl Oxide {
                     (r.size.w as f64 * s, r.size.h as f64 * s).into(),
                 );
                 self.overview_window(renderer, i, t, scale, alpha, radius * s as f32, out);
+            }
+            // Material Expressive: soft rounded tiles, drawn by a shader, with a rounded outline
+            let rounded = self.config.theme.style == "expressive" && self.shaders.is_some();
+            if rounded {
+                let sh = self.shaders.as_ref().unwrap();
+                let rr = (radius * 1.2 * s as f32 * 2.2).clamp(10.0, 34.0) * 1.0;
+                let scale_f = scale.x as f32;
+                let lr = Rectangle::<i32, Logical>::new((rect.loc.x.round() as i32, rect.loc.y.round() as i32).into(), (rect.size.w.round() as i32, rect.size.h.round() as i32).into());
+                let pr = rr * scale_f;
+                if (hover == Some(*ws) || *ws == cur) && p > 0.05 {
+                    let c = if *ws == cur { accent } else { [1.0, 1.0, 1.0, 1.0] };
+                    let a = p as f32 * if *ws == cur { 1.0 } else { 0.45 };
+                    let g = 4;
+                    let area = Rectangle::<i32, Logical>::new((lr.loc.x - g, lr.loc.y - g).into(), (lr.size.w + 2 * g, lr.size.h + 2 * g).into());
+                    out.push(
+                        PixelShaderElement::new(
+                            sh.fill.clone(),
+                            area,
+                            None,
+                            1.0,
+                            vec![
+                                crate::shaders::uniform_f("radius", pr + g as f32 * scale_f),
+                                crate::shaders::uniform_f("border", 2.5 * scale_f),
+                                crate::shaders::uniform_4f("color", [c[0] * a, c[1] * a, c[2] * a, a]),
+                            ],
+                            Kind::Unspecified,
+                        )
+                        .into(),
+                    );
+                }
+                let a = 0.45 * p as f32;
+                out.push(
+                    PixelShaderElement::new(
+                        sh.fill.clone(),
+                        lr,
+                        None,
+                        1.0,
+                        vec![crate::shaders::uniform_f("radius", pr), crate::shaders::uniform_f("border", 0.0), crate::shaders::uniform_4f("color", [0.0, 0.0, 0.0, a])],
+                        Kind::Unspecified,
+                    )
+                    .into(),
+                );
+                continue;
             }
             // outline for the workspace under the pointer; the current one gets the accent
             if (hover == Some(*ws) || *ws == cur) && p > 0.05 {

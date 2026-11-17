@@ -8,7 +8,7 @@ PanelWindow {
     id: win
     readonly property bool on: BarConfig.hud && OxideState.superHeld
     property real t: on ? 1 : 0
-    Behavior on t { NumberAnimation { duration: win.on ? 140 : 90; easing.type: Easing.OutCubic } }
+    Behavior on t { NumberAnimation { duration: win.on ? (Theme.expressive ? 320 * Theme.motionScale : 140) : 90; easing.type: win.on && Theme.expressive ? Easing.OutBack : Easing.OutCubic; easing.overshoot: 1.1 } }
 
     screen: Quickshell.screens[0]
     Connections {
@@ -27,7 +27,7 @@ PanelWindow {
     Timer { running: win.visible; repeat: true; interval: 1000; triggeredOnStart: true; onTriggered: win.now = new Date() }
 
     component Glass: Rectangle {
-        radius: Theme.rPop
+        radius: Theme.expressive ? height / 2 : Theme.rPop
         color: Theme.alpha(Theme.bg, 0.78)
         border.color: Theme.alpha(Theme.line, 0.9)
     }
@@ -120,8 +120,8 @@ PanelWindow {
                     spacing: 6
                     Rectangle {
                         anchors.verticalCenter: parent.verticalCenter
-                        width: Math.max(22, keyTxt.implicitWidth + 12); height: 22; radius: 6
-                        color: Theme.raised; border.color: Theme.line
+                        width: Math.max(22, keyTxt.implicitWidth + 12); height: 22; radius: Theme.expressive ? 11 : 6
+                        color: Theme.expressive ? Theme.secondaryContainer : Theme.raised; border.color: Theme.expressive ? "transparent" : Theme.line
                         Txt { id: keyTxt; anchors.centerIn: parent; text: parent.parent.modelData[0]; font { family: Theme.mono; pixelSize: 12; weight: Font.DemiBold } }
                     }
                     Txt { anchors.verticalCenter: parent.verticalCenter; text: parent.modelData[1]; color: Theme.muted; font.pixelSize: 12 }

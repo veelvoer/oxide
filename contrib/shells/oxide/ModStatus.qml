@@ -9,7 +9,7 @@ Rectangle {
     implicitWidth: row.width + 18
     implicitHeight: 28
     radius: Theme.rControl
-    color: mouse.containsMouse || (shell && shell.controlShown) ? Theme.raised : Theme.clear(Theme.raised)
+    color: Theme.expressive && (mouse.containsMouse || (shell && shell.controlShown)) ? Theme.surfaceHighest : mouse.containsMouse || (shell && shell.controlShown) ? Theme.raised : Theme.clear(Theme.raised)
     Behavior on color { ColorAnimation { duration: Theme.fast } }
 
     Row {
@@ -41,4 +41,5 @@ Rectangle {
         onClicked: root.shell.toggleControl(true)
         onWheel: w => Sys.setVolume(Sys.volume + (w.angleDelta.y > 0 ? 0.04 : -0.04))
     }
+    Elastic { radius: root.radius }
 }

@@ -14,7 +14,7 @@ PanelWindow {
 
     // 0 = hidden, 1 = fully in; drives the slide and the fade
     property real t: shown ? 1 : 0
-    Behavior on t { NumberAnimation { duration: 280; easing.type: win.shown ? Easing.OutCubic : Easing.InCubic } }
+    Behavior on t { NumberAnimation { duration: (Theme.expressive && win.shown ? Theme.moveMs : 280); easing.type: win.shown ? (Theme.expressive ? Easing.OutBack : Easing.OutCubic) : Easing.InCubic; easing.overshoot: Theme.moveOvershoot } }
 
     screen: Quickshell.screens[0]
     Connections {

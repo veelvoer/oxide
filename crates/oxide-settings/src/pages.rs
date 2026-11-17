@@ -92,9 +92,7 @@ pub fn layout(app: &mut App, ui: &mut Ui) {
     page_header(ui, "view-dashboard-outline", "Layout", "Tiling and focus");
     let adv = app.advanced;
     let g = &mut app.cfg.general;
-    ui.add_space(10.0);
-    ui.label(RichText::new("TILING STYLE").family(crate::theme::medium()).color(MUTED()).size(11.5).extra_letter_spacing(1.1));
-    ui.add_space(4.0);
+    section_label(ui, "Tiling style");
     layout_cards(ui, &mut g.layout);
     let l = &mut app.cfg.layout;
     card(ui, "", |ui| {
@@ -747,7 +745,7 @@ fn layout_cards(ui: &mut Ui, value: &mut LayoutKind) {
             let sel = tween(ui.ctx(), resp.id, (*value == kind) as u8 as f32, 0.18);
             let hov = tween(ui.ctx(), resp.id.with("h"), resp.hovered() as u8 as f32, 0.12);
             let p = ui.painter();
-            let r = radius(8);
+            let r = if expressive() { egui::CornerRadius::same(20) } else { radius(8) };
             p.rect_filled(rect, r, lerp_color(lerp_color(CARD(), CARD_HOVER(), hov), lerp_color(CARD(), ACCENT(), 0.10), sel));
             p.rect_stroke(rect, r, Stroke::new(1.0 + sel, lerp_color(BORDER(), ACCENT(), sel)), egui::StrokeKind::Inside);
             // the drawing

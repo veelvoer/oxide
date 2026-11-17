@@ -120,6 +120,8 @@ pub fn show() -> ! {
         // the phone's own screen stays dark (it can stay in your pocket); closing the window turns it off again
         "--turn-screen-off".into(),
         "--power-off-on-close".into(),
+        // a real (virtual) keyboard: PIN pads and password fields take it; the phone's lock screen too
+        "--keyboard=uhid".into(),
         // low delay: hardware H.264, no extra buffering, a size that is sharp on a monitor
         "--video-codec=h264".into(),
         // Constrained Baseline: every H.264 decoder can show it (openh264, which Fedora's scrcpy uses, only that)
@@ -142,6 +144,69 @@ pub fn show() -> ! {
             std::process::exit(1)
         }
     }
+}
+
+/// Ask for the PIN in a small password prompt; None when cancelled or no prompt tool exists.
+fn ask_pin() -> Option<String> {
+    let tries: [(&str, Vec<&str>); 3] = [
+        ("zenity", vec!["--password", "--title=Unlock phone"]),
+        ("kdialog", vec!["--password", "PIN or password of the phone", "--title", "Unlock phone"]),
+        ("systemd-ask-password", vec!["--timeout=60", "Phone PIN:"]),
+    ];
+    for (bin, args) in tries {
+        if !has(bin) {
+            continue;
+        }
+        let out = Command::new(bin).args(&args).stdin(Stdio::null()).stderr(Stdio::null()).output().ok()?;
+        if out.status.success() {
+            let pin = String::from_utf8_lossy(&out.stdout).trim_end_matches(['\n', '\r']).to_string();
+            return (!pin.is_empty()).then_some(pin);
+        }
+        return None;
+    }
+    None
+}
+
+/// Unlock the phone from the PC. Android hides its PIN pad from screen mirrors (the picture is black there), so this
+/// asks for the PIN here and types it on the phone. The PIN is never stored and goes to the phone through standard
+/// input, not through a command line.
+pub fn unlock() -> ! {
+    let Some(serial) = find() else {
+        notify("Phone not found", "Connect the phone (USB, or Wi-Fi pairing in Settings > Phone) first.");
+        std::process::exit(1)
+    };
+    let sh = |cmd: &str| {
+        let _ = adb(&["-s", &serial, "shell", cmd], 6);
+    };
+    // wake it and pull the PIN pad up from the bottom edge
+    sh("input keyevent KEYCODE_WAKEUP");
+    std::thread::sleep(Duration::from_millis(400));
+    sh("wm dismiss-keyguard");
+    sh("input swipe 540 2300 540 900 220");
+    std::thread::sleep(Duration::from_millis(500));
+    let Some(pin) = ask_pin() else {
+        notify("Phone unlock", "No PIN entered. The phone's PIN pad is blacked out in the mirror: type your PIN on the keyboard.");
+        std::process::exit(1)
+    };
+    let mut child = match Command::new("adb")
+        .args(["-s", &serial, "shell", "input text \"$(cat)\" && input keyevent KEYCODE_ENTER"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+    {
+        Ok(c) => c,
+        Err(e) => {
+            notify("Phone unlock", &format!("adb did not start: {e}"));
+            std::process::exit(1)
+        }
+    };
+    if let Some(mut i) = child.stdin.take() {
+        use std::io::Write;
+        let _ = i.write_all(pin.as_bytes());
+    }
+    let _ = child.wait();
+    std::process::exit(0)
 }
 
 /// With the phone on USB, once: the Oxide Remote app may switch Android's wireless debugging on and off from then on
@@ -197,6 +262,7 @@ pub fn pair(name: &str, password: &str) -> ! {
 pub fn cmd(args: &[String]) -> ! {
     match args.first().map(String::as_str) {
         Some("setup") => setup(),
+        Some("unlock") => unlock(),
         Some("pair") if args.len() >= 3 => pair(&args[1], &args[2]),
         _ => show(),
     }

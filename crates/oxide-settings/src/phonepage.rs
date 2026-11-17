@@ -130,6 +130,11 @@ pub fn page(app: &mut App, ui: &mut Ui) {
                 let _ = std::process::Command::new("oxide-ctl").arg("phone").spawn();
             }
         });
+        row_sub(ui, "lock-outline", "Unlock the phone", "Android hides its PIN pad from screen mirrors, so type the PIN here. It is never stored.", false, |ui| {
+            if ready && ghost_button(ui, "Unlock  (Super+Shift+P)").clicked() {
+                let _ = std::process::Command::new("oxide-ctl").args(["phone", "unlock"]).spawn();
+            }
+        });
         row_sub(ui, "lan-connect", "Set up phone screen", "Once, with the phone on USB (USB debugging on): the Oxide Remote app may then switch wireless debugging.", false, |ui| {
             if ready && ghost_button(ui, "Set up").clicked() {
                 let _ = std::process::Command::new("oxide-ctl").args(["phone", "setup"]).spawn();

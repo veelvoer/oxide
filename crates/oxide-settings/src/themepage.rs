@@ -16,9 +16,7 @@ pub fn page(app: &mut App, ui: &mut Ui) {
     page_header(ui, "", "Theme", "Colors for the bar, launcher, panels and your terminal.");
     let before = app.cfg.theme.clone();
 
-    ui.add_space(10.0);
-    ui.label(RichText::new("STYLE").family(crate::theme::medium()).color(MUTED()).size(11.5).extra_letter_spacing(1.1));
-    ui.add_space(4.0);
+    section_label(ui, "Style");
     let old_style = app.cfg.theme.style.clone();
     style_cards(ui, &app.cfg.theme.clone(), &mut app.cfg.theme.style);
     if app.cfg.theme.style != old_style {
@@ -292,7 +290,7 @@ fn style_cards(ui: &mut Ui, theme: &oxide_config::theme::ThemeCfg, style: &mut S
             let sel = tween(ui.ctx(), resp.id, (style.as_str() == key) as u8 as f32, 0.18);
             let hov = tween(ui.ctx(), resp.id.with("h"), resp.hovered() as u8 as f32, 0.12);
             let p = ui.painter();
-            let r = radius(8);
+            let r = if expressive() { egui::CornerRadius::same(20) } else { radius(8) };
             p.rect_filled(rect, r, lerp_color(lerp_color(CARD(), CARD_HOVER(), hov), lerp_color(CARD(), ACCENT(), 0.10), sel));
             p.rect_stroke(rect, r, Stroke::new(1.0 + sel, lerp_color(BORDER(), ACCENT(), sel)), eframe::egui::StrokeKind::Inside);
             // the preview: a desktop in the style's own colors

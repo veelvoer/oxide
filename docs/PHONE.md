@@ -46,8 +46,7 @@ An update installs only over an app signed with the same key, so keep the key yo
 
 **Super+P** (or *Settings → Phone → Show my phone*) opens your phone's screen in a window, with very little delay
 (scrcpy: the phone's own video encoder, typically 35–70 ms on good Wi-Fi). You can use it with mouse and keyboard
-while the phone stays locked in your pocket: its own screen stays dark, a locked phone shows its lock screen and you
-type the PIN on the PC. Closing the window turns the phone's screen off again. Super+P again closes it.
+while the phone stays locked in your pocket: its own screen stays dark, a locked phone shows its lock screen. Android hides its PIN pad from screen mirrors (the picture goes black there), so unlock with **Super+Shift+P** (or *Settings → Phone → Unlock the phone*): a small prompt asks for the PIN, which is typed on the phone and never stored. Typing the PIN blind on the keyboard in the phone window works too. Closing the window turns the phone's screen off again. Super+P again closes it.
 
 Setup, once (install `scrcpy` and `android-tools` first):
 

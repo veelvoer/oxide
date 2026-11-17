@@ -53,6 +53,9 @@ Singleton {
     readonly property real rControl: expressive ? 999 : Math.round(roundness * 0.5)
     readonly property real rBox: expressive ? Math.max(20, roundness) : roundness
     readonly property real rPop: expressive ? 28 : Math.round(roundness * 1.25)
+    // search fields and chips: pills in Expressive
+    readonly property real rField: expressive ? 999 : rBox
+    readonly property color field: expressive ? surfaceHigh : raised
 
     // motion: one curve, short durations
     readonly property var curve: [0.2, 0.8, 0.2, 1, 1, 1]

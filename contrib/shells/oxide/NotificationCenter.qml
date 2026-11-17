@@ -16,7 +16,7 @@ Pop {
         color: Theme.surface
         border.color: Theme.expressive ? "transparent" : Theme.line
 
-        Txt { x: 16; y: 16; text: "Notifications"; color: Theme.text; font { pixelSize: 15; weight: Font.DemiBold } }
+        Txt { x: 16; y: 16; text: "Notifications"; color: Theme.expressive ? Theme.accent : Theme.text; font { pixelSize: Theme.expressive ? 16 : 15; weight: Font.DemiBold } }
         Row {
             anchors { right: parent.right; rightMargin: 12; top: parent.top; topMargin: 10 }
             spacing: 2
@@ -37,9 +37,12 @@ Pop {
             clip: true
             model: root.shell.allNotifications
             delegate: Item {
+                id: nrow
                 required property var modelData
+                required property int index
                 width: list.width
                 height: 70
+                Arrive { when: root.shown; order: nrow.index + 1 }
                 Column {
                     x: 4; y: 8
                     width: parent.width - 8 - 34

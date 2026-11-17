@@ -52,6 +52,7 @@ Pop {
                 }
             }
         }
+        Arrive { when: root.shown; order: 1 }
         Grid {
             x: 18; y: 90; width: parent.width - 36
             columns: 7
@@ -66,9 +67,13 @@ Pop {
                     height: 40
                     Rectangle {
                         anchors.centerIn: parent
-                        width: 34; height: 34; radius: Theme.rBox
+                        width: 34; height: 34; radius: Theme.expressive ? 17 : Theme.rBox
                         color: parent.today ? Theme.accent : Theme.clear(Theme.accent)
+                        // today pops in with a spring (Expressive)
+                        scale: parent.today ? 1 : 0.6
+                        Behavior on scale { enabled: Theme.expressive; NumberAnimation { duration: Theme.fastMs; easing.type: Easing.OutBack; easing.overshoot: 2 } }
                     }
+                    Elastic { radius: 17; visible: parent.inMonth }
                     Txt {
                         anchors.centerIn: parent
                         visible: parent.inMonth

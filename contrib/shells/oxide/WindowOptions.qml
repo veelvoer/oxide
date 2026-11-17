@@ -78,9 +78,10 @@ Pop {
             Row {
                 spacing: 10
                 height: 36
+                Arrive { when: root.shown; order: 0 }
                 Rectangle {
-                    width: 36; height: 36; radius: Theme.rBox
-                    color: Theme.raised
+                    width: 36; height: 36; radius: Theme.expressive ? 18 : Theme.rBox
+                    color: Theme.expressive ? Theme.container : Theme.raised
                     Icon { anchors.centerIn: parent; name: "application-outline"; size: 18; color: Theme.muted }
                 }
                 Column {
@@ -96,7 +97,8 @@ Pop {
                 visible: !!root.win
                 width: parent.width
                 spacing: 8
-                Txt { text: "This window"; color: Theme.muted; font { pixelSize: 11; weight: Font.Medium } }
+                Arrive { when: root.shown; order: 1 }
+                Txt { text: "This window"; color: Theme.expressive ? Theme.accent : Theme.muted; font { pixelSize: Theme.expressive ? 13 : 11; weight: Font.Medium } }
                 Flow {
                     width: parent.width
                     spacing: 6
@@ -126,9 +128,10 @@ Pop {
                 visible: !!root.win
                 width: parent.width
                 spacing: 10
+                Arrive { when: root.shown; order: 2 }
                 Row {
                     width: parent.width
-                    Txt { text: "Always, for " + root.appName; color: Theme.muted; font { pixelSize: 11; weight: Font.Medium }
+                    Txt { text: "Always, for " + root.appName; color: Theme.expressive ? Theme.accent : Theme.muted; font { pixelSize: Theme.expressive ? 13 : 11; weight: Font.Medium }
                         width: parent.width - undoChip.width }
                     Chip {
                         id: undoChip

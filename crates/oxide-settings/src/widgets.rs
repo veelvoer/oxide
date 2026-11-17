@@ -122,24 +122,47 @@ fn arrive<R>(ui: &mut Ui, f: impl FnOnce(&mut Ui) -> R) -> R {
     .inner
 }
 
+/// A heading above picture cards: Hearth's colored sentence-case title in Expressive, small capitals otherwise.
+pub fn section_label(ui: &mut Ui, text: &str) {
+    ui.add_space(if expressive() { 16.0 } else { 10.0 });
+    if expressive() {
+        ui.horizontal(|ui| {
+            ui.add_space(6.0);
+            ui.label(RichText::new(text).family(medium()).color(ACCENT()).size(14.5));
+        });
+    } else {
+        ui.label(RichText::new(text.to_uppercase()).family(medium()).color(MUTED()).size(11.5).extra_letter_spacing(1.1));
+    }
+    ui.add_space(if expressive() { 6.0 } else { 4.0 });
+}
+
 /// A group of rows: one flat container with hairline dividers. The title is plain sentence case above it.
 pub fn card<R>(ui: &mut Ui, title: &str, body: impl FnOnce(&mut Ui) -> R) -> R {
     arrive(ui, |ui| plain_card(ui, title, body))
 }
 
 fn plain_card<R>(ui: &mut Ui, title: &str, body: impl FnOnce(&mut Ui) -> R) -> R {
+    let ex = expressive();
     if !title.is_empty() {
-        ui.add_space(10.0);
-        ui.label(RichText::new(title.to_uppercase()).family(medium()).color(MUTED()).size(11.5).extra_letter_spacing(1.1));
-        ui.add_space(4.0);
+        ui.add_space(if ex { 16.0 } else { 10.0 });
+        if ex {
+            // Hearth's section title: the primary color, sentence case, a little larger
+            ui.horizontal(|ui| {
+                ui.add_space(6.0);
+                ui.label(RichText::new(title).family(medium()).color(ACCENT()).size(14.5));
+            });
+        } else {
+            ui.label(RichText::new(title.to_uppercase()).family(medium()).color(MUTED()).size(11.5).extra_letter_spacing(1.1));
+        }
+        ui.add_space(if ex { 6.0 } else { 4.0 });
     } else {
         ui.add_space(6.0);
     }
     egui::Frame::new()
-        .fill(CARD())
-        .stroke(Stroke::new(1.0, BORDER()))
-        .corner_radius(radius(8))
-        .inner_margin(egui::Margin::symmetric(14, 2))
+        .fill(if ex { CARD_HOVER() } else { CARD() })
+        .stroke(if ex { Stroke::NONE } else { Stroke::new(1.0, BORDER()) })
+        .corner_radius(if ex { egui::CornerRadius::same(20) } else { radius(8) })
+        .inner_margin(egui::Margin::symmetric(if ex { 18 } else { 14 }, 2))
         .show(ui, |ui| {
             ui.set_width(ui.available_width());
             ui.spacing_mut().item_spacing.y = 0.0;
@@ -372,6 +395,17 @@ pub fn choice_row<T: PartialEq + Clone>(
     options: &[(T, &str)],
 ) {
     row(ui, name, help, last, |ui| {
+        if expressive() {
+            // Hearth's filter chips: 8 px corners that round into a pill when chosen, a tonal fill and a check, a pop
+            ui.spacing_mut().item_spacing.x = 8.0;
+            for (opt, label) in options.iter().rev() {
+                let selected = value == opt;
+                if m3_chip(ui, label, selected).clicked() {
+                    *value = opt.clone();
+                }
+            }
+            return;
+        }
         // segmented control in a dark inset; laid out right to left, so reversed
         egui::Frame::new().fill(DEEP()).stroke(Stroke::new(1.0, BORDER())).corner_radius(radius(8)).inner_margin(egui::Margin::same(3)).show(ui, |ui| {
             ui.spacing_mut().item_spacing.x = 2.0;
@@ -571,4 +605,42 @@ pub fn tag(ui: &mut Ui, text: &str, color: Color32) {
     let (rect, _) = ui.allocate_exact_size(size, Sense::hover());
     ui.painter().rect_filled(rect, radius(3), color.linear_multiply(0.16));
     ui.painter().galley(Pos2::new(rect.left() + 7.0, rect.center().y - galley.size().y / 2.0), galley, color);
+}
+
+/// A Material 3 filter chip: square-ish when off, a pill with a check and a tonal fill when chosen; it pops a little
+/// when it gets chosen and leans toward the pointer while pressed.
+pub fn m3_chip(ui: &mut Ui, label: &str, selected: bool) -> egui::Response {
+    let font = egui::FontId::new(14.0, medium());
+    let fg = if selected { ON_CONTAINER() } else { TEXT() };
+    let galley = ui.painter().layout_no_wrap(label.to_string(), font, fg);
+    let check = ui.ctx().animate_bool_with_time(ui.next_auto_id().with("chk"), selected, 0.16);
+    let w = galley.size().x + 28.0 + 22.0 * check;
+    let (rect, resp) = ui.allocate_exact_size(vec2(w, 36.0), Sense::click());
+    let id = resp.id;
+    let corner = spring_with(ui.ctx(), id.with("corner"), if selected { 18.0 } else { 8.0 }, 800.0, 0.6).clamp(0.0, 18.0);
+    let pop = spring_with(ui.ctx(), id.with("pop"), 1.0, 700.0, 0.4);
+    if selected && !ui.ctx().data(|d| d.get_temp::<bool>(id.with("was"))).unwrap_or(false) {
+        ui.ctx().data_mut(|d| d.insert_temp(id.with("pop"), (0.9f32, 0.0f32)));
+    }
+    let was = selected;
+    ui.ctx().data_mut(|d| d.insert_temp(id.with("was"), was));
+    let press = spring_with(ui.ctx(), id.with("press"), resp.is_pointer_button_down_on() as u8 as f32, 800.0, 0.6).clamp(0.0, 1.3);
+    let shown = Rect::from_center_size(rect.center(), rect.size() * pop * (1.0 - 0.03 * press));
+    let hov = tween(ui.ctx(), id.with("hov"), resp.hovered() as u8 as f32, 0.12);
+    let p = ui.painter();
+    if selected {
+        p.rect_filled(shown, corner, lerp_color(CONTAINER(), ON_CONTAINER(), 0.05 * press));
+    } else {
+        p.rect_filled(shown, corner, TEXT().gamma_multiply(0.06 * hov + 0.06 * press));
+        p.rect_stroke(shown, corner, Stroke::new(1.0, BORDER()), egui::StrokeKind::Inside);
+    }
+    let mut x = shown.center().x - (galley.size().x + 22.0 * check) / 2.0;
+    if check > 0.01 {
+        let c = Pos2::new(x + 7.0, shown.center().y);
+        let k = 4.5 * check;
+        p.add(egui::Shape::line(vec![Pos2::new(c.x - k, c.y), Pos2::new(c.x - k * 0.3, c.y + k * 0.7), Pos2::new(c.x + k, c.y - k * 0.7)], Stroke::new(2.0, ON_CONTAINER().gamma_multiply(check))));
+        x += 22.0 * check;
+    }
+    p.galley(Pos2::new(x, shown.center().y - galley.size().y / 2.0), galley, fg);
+    resp.on_hover_cursor(egui::CursorIcon::PointingHand)
 }

@@ -623,6 +623,7 @@ impl Default for Config {
             b("SUPER", "d", Exec("oxide-ctl ipc shell toggleLauncher".into())),
             // the phone's screen in a window (scrcpy)
             b("SUPER", "p", Exec("oxide-ctl phone".into())),
+            b("SUPER+SHIFT", "p", Exec("oxide-ctl phone unlock".into())),
             // Alt + J K I L act as the arrow keys everywhere (add Shift or Ctrl to select or jump words)
             b("ALT", "j", SendKey("Left".into())),
             b("ALT", "k", SendKey("Down".into())),
@@ -816,7 +817,7 @@ impl Config {
 
     /// Older config files do not know the shell shortcuts: add them unless the key is taken.
     pub fn add_missing_shell_binds(&mut self) {
-        for d in Config::default().binds.into_iter().filter(|b| matches!(&b.action, Action::SendKey(_)) || (matches!(&b.action, Action::Exec(c) if c.contains("active-shell") || c.starts_with("oxide-ctl ipc ") || c == "oxide-ctl phone") || matches!(&b.action, Action::ToggleOverview))) {
+        for d in Config::default().binds.into_iter().filter(|b| matches!(&b.action, Action::SendKey(_)) || (matches!(&b.action, Action::Exec(c) if c.contains("active-shell") || c.starts_with("oxide-ctl ipc ") || c.starts_with("oxide-ctl phone")) || matches!(&b.action, Action::ToggleOverview))) {
             let taken = self.binds.iter().any(|b| b.mods.eq_ignore_ascii_case(&d.mods) && b.key.eq_ignore_ascii_case(&d.key));
             let has_action = self.binds.iter().any(|b| b.action == d.action);
             if !taken && !has_action {

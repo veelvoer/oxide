@@ -30,4 +30,5 @@ Rectangle {
         }
     }
     MouseArea { id: mouse; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor; onClicked: root.shell.toggleCalendar(true) }
+    Elastic { radius: root.radius }
 }

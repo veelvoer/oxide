@@ -42,8 +42,9 @@ Pop {
         Rectangle {
             x: 12; y: 12
             width: parent.width - 24; height: 44
-            radius: Theme.rBox
-            color: Theme.raised
+            radius: Math.min(Theme.rField, height / 2)
+            color: Theme.field
+            Arrive { when: root.shown; order: 0 }
             Icon { x: 14; anchors.verticalCenter: parent.verticalCenter; name: "magnify"; size: 18; color: Theme.muted }
             TextInput {
                 id: input
@@ -72,7 +73,15 @@ Pop {
             clip: true
             currentIndex: 0
             // one highlight that glides to the selected row
-            highlight: Rectangle { radius: Theme.rBox; color: Theme.alpha(Theme.accent, 0.2) }
+            highlightFollowsCurrentItem: !Theme.expressive
+            highlight: Rectangle {
+                width: list.width
+                y: Theme.expressive && list.currentItem ? list.currentItem.y : y
+                height: Theme.expressive && list.currentItem ? list.currentItem.height : height
+                radius: Theme.expressive ? 28 : Theme.rBox
+                color: Theme.expressive ? Theme.secondaryContainer : Theme.alpha(Theme.accent, 0.2)
+                Behavior on y { enabled: Theme.expressive; NumberAnimation { duration: Theme.fastMs; easing.type: Easing.OutBack; easing.overshoot: 1.0 } }
+            }
             highlightMoveDuration: 150
             highlightMoveVelocity: -1
             highlightResizeDuration: 150
@@ -120,6 +129,8 @@ Pop {
                 }
                 HoverHandler { id: hover; onPointChanged: if (hovered) list.currentIndex = row.index }
                 TapHandler { onTapped: { list.currentIndex = row.index; root.pick(row.modelData); } }
+                Arrive { when: root.shown; order: row.index + 1 }
+                Elastic { radius: 28 }
             }
         }
 

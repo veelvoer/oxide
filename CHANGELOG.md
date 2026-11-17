@@ -2,6 +2,10 @@
 
 ## 0.2.0 (unreleased)
 
+* New: unlocking the phone from the PC (Super+Shift+P): Android hides its PIN pad from screen mirrors, so the PIN is asked
+  on the PC and typed on the phone (never stored).
+* Expressive everywhere: Settings (cards, colored titles, filter chips, Material switch), clipboard, calendar, HUD,
+  notifications, overview tiles (rounded), bar modules.
 * New: **your phone on the PC** (Super+P): its screen with very little delay, usable while it is locked in your pocket.
 * New: Hearth's expressive motion: elastic presses with light and ring, staggered entrances, morphing chips.
 * Faster panels: key binds reach the shell directly (no process start), the launcher searches a prepared index and
