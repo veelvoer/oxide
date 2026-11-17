@@ -145,7 +145,9 @@ pub fn elastic(ui: &Ui, resp: &Response, rect: Rect, radius: f32) -> (Vec2, f32)
     // a new touch: the ring starts where the finger is
     let was = ctx.data(|d| d.get_temp::<bool>(id.with("down"))).unwrap_or(false);
     if down && !was {
-        ctx.data_mut(|d| d.insert_temp(id.with("ring"), (pos.unwrap_or(rect.center()), ctx.input(|i| i.time))));
+        // read the clock first: egui's lock cannot be taken twice (input inside data_mut would hang)
+        let now = ctx.input(|i| i.time);
+        ctx.data_mut(|d| d.insert_temp(id.with("ring"), (pos.unwrap_or(rect.center()), now)));
     }
     ctx.data_mut(|d| d.insert_temp(id.with("down"), down));
     let (k, ratio) = if down { (550.0, 0.82) } else { (350.0, 0.52) };

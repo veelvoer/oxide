@@ -11,7 +11,7 @@ pub struct Phone {
     pub ltk: String,
     pub paired: u64,
     pub last_seen: u64,
-    /// the address it last connected from (oxide-ctl phone tries it for the phone's screen)
+    /// the address it last connected from
     pub ip: String,
 }
 

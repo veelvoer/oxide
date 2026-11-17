@@ -49,10 +49,17 @@ An update installs only over an app signed with the same key, so keep the key yo
 while the phone stays locked in your pocket: its own screen stays dark, a locked phone shows its lock screen and you
 type the PIN on the PC. Closing the window turns the phone's screen off again. Super+P again closes it.
 
-Setup, once: install `scrcpy` and `android-tools`, turn on USB debugging on the phone (Developer options), connect it
-with USB and press *Settings → Phone → Set up phone screen*. From then on it works over Wi-Fi. A phone restart turns
-Wi-Fi debugging off; with **Show this phone on my PCs** on in the app (its settings), the app switches Android's
-wireless debugging back on whenever it starts, and the PC finds the phone by itself.
+Setup, once (install `scrcpy` and `android-tools` first):
+
+1. On the phone, turn on USB debugging (Developer options), connect it with USB and press
+   *Settings → Phone → Set up phone screen*. This only lets the Oxide Remote app switch wireless debugging on and off.
+2. In the app's settings, switch **Show this phone on my PCs** on.
+3. *Settings → Phone → Pair over Wi-Fi → Show code*, and on the phone *Developer options → Wireless debugging →
+   Pair device with QR code*: scan it. Done, no cable needed from then on.
+
+Only Android's own wireless debugging is used (Android 11+): encrypted, only for computers the phone paired with,
+and it switches itself off on another network (the app switches it back on when it starts). The old unencrypted
+`adb tcpip` mode is never used. Android 10 and older work over USB only.
 
 `[remote] phone_max_size` (1600), `phone_bitrate` (12, Mbit/s), `phone_audio` (false: the phone's sound stays on the phone).
 

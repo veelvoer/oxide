@@ -1079,12 +1079,14 @@ impl App {
                 } else {
                     "Once: connect the phone with USB and choose Settings > Phone > Set up phone screen on the PC."
                 };
-                ui::row(ui, ic::MONITOR, "Show this phone on my PCs", sub, |ui| {
-                    ui.add_enabled_ui(allowed, |ui| {
-                        if tap(&ui::chip(ui, Some(if on { ic::CHECK } else { ic::PLUS }), if on { "On" } else { "Off" }, on)) {
-                            on = !on;
-                        }
-                    });
+                ui.label(RichText::new("Show this phone on my PCs").font(medium(16.0)).color(p.text));
+                ui.add(egui::Label::new(RichText::new(sub).size(13.5).color(p.muted)).wrap());
+                ui.add_space(6.0);
+                ui.add_enabled_ui(allowed, |ui| {
+                    let mut sel = if on { 1 } else { 0 };
+                    if ui::segmented(ui, &[(ic::CLOSE, "Off"), (ic::MONITOR, "On")], &mut sel) {
+                        on = sel == 1;
+                    }
                 });
                 if allowed && on != self.store.show_on_pc {
                     self.store.show_on_pc = on;

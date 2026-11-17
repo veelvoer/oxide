@@ -5,8 +5,10 @@
 //!   oxide-ctl phone          show the phone (again: hide it)
 //!   oxide-ctl phone setup    with the phone on USB once: from then on it works over Wi-Fi
 //!
-//! The phone is found over USB, at the addresses it was last seen on (Wi-Fi debugging on port 5555 after `setup`),
-//! and through Android's wireless debugging announcements on the network (mDNS).
+//! The phone is found over USB, or over Wi-Fi through Android's wireless debugging (Android 11+: encrypted, only
+//! for computers the phone trusts, off again on another network), which announces itself on the network (mDNS).
+//! The Oxide Remote app switches it on and off ("Show this phone on my PCs"). The old unencrypted `adb tcpip` mode
+//! is never used.
 use std::{
     path::PathBuf,
     process::{Command, Stdio},
@@ -15,13 +17,6 @@ use std::{
 
 fn runtime() -> PathBuf {
     std::env::var_os("XDG_RUNTIME_DIR").map(PathBuf::from).unwrap_or_else(std::env::temp_dir)
-}
-
-fn state_file() -> PathBuf {
-    std::env::var_os("XDG_STATE_HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from(std::env::var_os("HOME").unwrap_or_default()).join(".local/state"))
-        .join("oxide/phone.json")
 }
 
 fn has(bin: &str) -> bool {
@@ -65,28 +60,6 @@ fn devices() -> Vec<(String, bool)> {
         .collect()
 }
 
-/// Addresses the phone was seen on: after `setup`, and by Oxide Remote sessions.
-fn known_ips() -> Vec<String> {
-    let mut ips: Vec<String> = vec![];
-    if let Some(v) = std::fs::read_to_string(state_file()).ok().and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok()) {
-        if let Some(ip) = v["ip"].as_str() {
-            ips.push(ip.to_string());
-        }
-    }
-    // the phones paired with oxide-remoted, at the address they last connected from
-    let remote = oxide_config::Config::path().with_file_name("remote.json");
-    if let Some(v) = std::fs::read_to_string(remote).ok().and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok()) {
-        for p in v["phones"].as_array().into_iter().flatten() {
-            if let Some(ip) = p["ip"].as_str().filter(|s| !s.is_empty()) {
-                if !ips.iter().any(|x| x == ip) {
-                    ips.push(ip.to_string());
-                }
-            }
-        }
-    }
-    ips
-}
-
 /// Find the phone and connect to it; the serial to use.
 fn find() -> Option<String> {
     let now = devices();
@@ -101,9 +74,16 @@ fn find() -> Option<String> {
             }
         }
     }
-    // Wi-Fi debugging after `setup` (port 5555), at the addresses the phone was seen on
-    for ip in known_ips() {
-        let _ = adb(&["connect", &format!("{ip}:5555")], 4);
+    // the announcement can take a moment after the app switched wireless debugging on
+    if devices().is_empty() {
+        std::thread::sleep(Duration::from_millis(1500));
+        if let Some(list) = adb(&["mdns", "services"], 4) {
+            for l in list.lines().filter(|l| l.contains("_adb-tls-connect")) {
+                if let Some(addr) = l.split_whitespace().find(|w| w.contains(':') && w.chars().next().is_some_and(|c| c.is_ascii_digit())) {
+                    let _ = adb(&["connect", addr], 5);
+                }
+            }
+        }
     }
     devices().first().map(|(s, _)| s.clone())
 }
@@ -142,6 +122,8 @@ pub fn show() -> ! {
         "--power-off-on-close".into(),
         // low delay: hardware H.264, no extra buffering, a size that is sharp on a monitor
         "--video-codec=h264".into(),
+        // Constrained Baseline: every H.264 decoder can show it (openh264, which Fedora's scrcpy uses, only that)
+        "--video-codec-options=profile:int=1,level:int=4096".into(),
         format!("--max-size={}", cfg.phone_max_size.clamp(480, 4096)),
         format!("--video-bit-rate={}M", cfg.phone_bitrate.clamp(2, 40)),
         "--max-fps=60".into(),
@@ -162,42 +144,60 @@ pub fn show() -> ! {
     }
 }
 
-/// With the phone on USB: allow Wi-Fi from now on (until the phone restarts; the Oxide Remote app keeps wireless
-/// debugging on after that, with the permission granted here).
+/// With the phone on USB, once: the Oxide Remote app may switch Android's wireless debugging on and off from then on
+/// (its "Show this phone on my PCs" switch). Nothing else on the phone changes.
 pub fn setup() -> ! {
     let usb: Vec<String> = devices().into_iter().filter(|(_, usb)| *usb).map(|(s, _)| s).collect();
     let Some(serial) = usb.first() else {
         notify("Phone screen setup", "Connect the phone with a USB cable, allow USB debugging on it, then try again.");
         std::process::exit(1)
     };
-    // the app may switch wireless debugging on by itself from now on
-    let _ = adb(&["-s", serial, "shell", "pm", "grant", "dev.oxide.remote", "android.permission.WRITE_SECURE_SETTINGS"], 8);
-    // its Wi-Fi address
-    let route = adb(&["-s", serial, "shell", "ip", "route"], 6).unwrap_or_default();
-    let ip = route
-        .lines()
-        .filter(|l| l.contains("wlan"))
-        .find_map(|l| l.split_whitespace().skip_while(|w| *w != "src").nth(1).map(str::to_string));
-    let _ = adb(&["-s", serial, "tcpip", "5555"], 10);
-    if let Some(ip) = &ip {
-        let _ = std::fs::create_dir_all(state_file().parent().unwrap_or(&runtime()));
-        let _ = std::fs::write(state_file(), serde_json::json!({ "ip": ip }).to_string());
-        std::thread::sleep(Duration::from_millis(1500));
-        let _ = adb(&["connect", &format!("{ip}:5555")], 6);
+    let out = adb(&["-s", serial, "shell", "pm", "grant", "dev.oxide.remote", "android.permission.WRITE_SECURE_SETTINGS"], 8).unwrap_or_default();
+    if out.to_lowercase().contains("unknown package") || out.to_lowercase().contains("exception") {
+        notify("Phone screen setup", "Install the Oxide Remote app on the phone first.");
+        std::process::exit(1)
     }
     notify(
         "Phone screen ready",
-        &match ip {
-            Some(ip) => format!("You can unplug the phone. Super+P shows its screen over Wi-Fi ({ip})."),
-            None => "Super+P shows its screen. The phone is not on Wi-Fi now, so for the moment only over USB.".into(),
-        },
+        "In the Oxide Remote app, switch on \"Show this phone on my PCs\" (its settings). Then Super+P shows the phone, also over Wi-Fi.",
     );
     std::process::exit(0)
+}
+
+/// Pair this PC with the phone's wireless debugging, once (Android asks for it on top of the USB trust).
+/// The phone scans a QR code `WIFI:T:ADB;S:<name>;P:<password>;;` (Wireless debugging > Pair device with QR code); it
+/// then announces a pairing service under `name`, and this pairs with it. Progress goes to stdout, one line each.
+pub fn pair(name: &str, password: &str) -> ! {
+    let start = std::time::Instant::now();
+    while start.elapsed() < Duration::from_secs(120) {
+        let list = adb(&["mdns", "services"], 4).unwrap_or_default();
+        let found = list.lines().filter(|l| l.contains("_adb-tls-pairing") && l.contains(name)).find_map(|l| {
+            l.split_whitespace().find(|w| w.contains(':') && w.chars().next().is_some_and(|c| c.is_ascii_digit())).map(str::to_string)
+        });
+        if let Some(addr) = found {
+            println!("pairing {addr}");
+            let out = adb(&["pair", &addr, password], 20).unwrap_or_default();
+            if out.to_lowercase().contains("success") {
+                println!("paired");
+                // connect right away: the phone announces its connect service a moment later
+                std::thread::sleep(Duration::from_millis(1500));
+                let _ = find();
+                notify("Phone paired", "Super+P shows your phone over Wi-Fi now.");
+                std::process::exit(0)
+            }
+            println!("failed {}", out.trim());
+            std::process::exit(1)
+        }
+        std::thread::sleep(Duration::from_millis(700));
+    }
+    println!("timeout");
+    std::process::exit(1)
 }
 
 pub fn cmd(args: &[String]) -> ! {
     match args.first().map(String::as_str) {
         Some("setup") => setup(),
+        Some("pair") if args.len() >= 3 => pair(&args[1], &args[2]),
         _ => show(),
     }
 }

@@ -67,6 +67,8 @@ pub struct Win {
     /// A tiled Chromium/Electron window gets its real size only after its first frame (see `apply_visual`); until
     /// it has drawn at that size it is not shown, so nothing jumps.
     pub size_deferred: bool,
+    /// a floating window that chooses its own size: placed at that size after its first frame
+    pub auto_float: bool,
     pub held: Option<std::time::Instant>,
     /// Opacity multiplier from the fade animation, 0..=1.
     pub fade: f32,

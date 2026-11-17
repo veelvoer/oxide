@@ -130,6 +130,13 @@ impl CompositorHandler for Oxide {
             if let Some(i) = self.wins.iter().position(|w| w.held.is_some() && w.window.toplevel().is_some_and(|t| t.wl_surface() == &root)) {
                 self.held_commit(i);
             }
+            if let Some(i) = self.wins.iter().position(|w| w.auto_float && w.window.toplevel().is_some_and(|t| t.wl_surface() == &root)) {
+                if self.wins[i].floating {
+                    self.float_to_client_size(i);
+                } else {
+                    self.wins[i].auto_float = false;
+                }
+            }
         }
         self.popups.commit(surface);
 

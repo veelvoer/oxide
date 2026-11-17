@@ -14,6 +14,61 @@ pub struct PhoneState {
     phones_before: usize,
     name: String,
     message: Option<String>,
+    /// pairing the phone's wireless debugging: the QR code's text, and the `oxide-ctl phone pair` run with its result
+    wifi_pair: Option<WifiPair>,
+    close_pair: bool,
+}
+
+struct WifiPair {
+    qr: String,
+    status: std::sync::Arc<std::sync::Mutex<String>>,
+    started: Instant,
+}
+
+/// Start pairing: a random name and password go into the QR code; `oxide-ctl phone pair` waits for the phone.
+fn start_wifi_pair(ctx: &egui::Context) -> WifiPair {
+    let rnd = |n: usize| -> String {
+        let mut b = [0u8; 16];
+        let _ = std::fs::File::open("/dev/urandom").and_then(|mut f| std::io::Read::read_exact(&mut f, &mut b));
+        b.iter().take(n).map(|x| (b'a' + x % 26) as char).collect()
+    };
+    let (name, pw) = (format!("oxide-{}", rnd(6)), rnd(10));
+    let status = std::sync::Arc::new(std::sync::Mutex::new("waiting".to_string()));
+    let (st, ctx) = (status.clone(), ctx.clone());
+    let (n2, p2) = (name.clone(), pw.clone());
+    std::thread::spawn(move || {
+        if let Ok(mut c) = std::process::Command::new("oxide-ctl").args(["phone", "pair", &n2, &p2]).stdout(std::process::Stdio::piped()).spawn() {
+            if let Some(out) = c.stdout.take() {
+                for line in std::io::BufRead::lines(std::io::BufReader::new(out)).map_while(Result::ok) {
+                    *st.lock().unwrap() = line;
+                    ctx.request_repaint();
+                }
+            }
+            let _ = c.wait();
+        }
+    });
+    WifiPair { qr: format!("WIFI:T:ADB;S:{name};P:{pw};;"), status, started: Instant::now() }
+}
+
+/// A QR code drawn as squares, dark on white (phones read it best that way).
+fn qr(ui: &mut Ui, text: &str, size: f32) {
+    let Ok(code) = qrcode::QrCode::new(text.as_bytes()) else { return };
+    let n = code.width();
+    let quiet = 2;
+    let cell = (size / (n + quiet * 2) as f32).floor().max(1.0);
+    let total = cell * (n + quiet * 2) as f32;
+    let (rect, _) = ui.allocate_exact_size(egui::vec2(total, total), egui::Sense::hover());
+    let p = ui.painter();
+    p.rect_filled(rect, 10.0, egui::Color32::WHITE);
+    let colors = code.to_colors();
+    for y in 0..n {
+        for x in 0..n {
+            if colors[y * n + x] == qrcode::Color::Dark {
+                let r = egui::Rect::from_min_size(rect.min + egui::vec2((x + quiet) as f32 * cell, (y + quiet) as f32 * cell), egui::vec2(cell, cell));
+                p.rect_filled(r, 0.0, egui::Color32::BLACK);
+            }
+        }
+    }
 }
 
 fn remoted(args: &[&str]) -> Option<serde_json::Value> {
@@ -75,12 +130,50 @@ pub fn page(app: &mut App, ui: &mut Ui) {
                 let _ = std::process::Command::new("oxide-ctl").arg("phone").spawn();
             }
         });
-        row_sub(ui, "lan-connect", "Set up over Wi-Fi", "Once, with the phone on USB (USB debugging on). After that no cable is needed.", true, |ui| {
-            if ready && ghost_button(ui, "Set up phone screen").clicked() {
+        row_sub(ui, "lan-connect", "Set up phone screen", "Once, with the phone on USB (USB debugging on): the Oxide Remote app may then switch wireless debugging.", false, |ui| {
+            if ready && ghost_button(ui, "Set up").clicked() {
                 let _ = std::process::Command::new("oxide-ctl").args(["phone", "setup"]).spawn();
             }
         });
+        let pairing = st.wifi_pair.is_some();
+        row_sub(ui, "wifi-strength-4", "Pair over Wi-Fi", "Once, for Wi-Fi without a cable: scan the code on the phone.", !pairing, |ui| {
+            if ready && !pairing && ghost_button(ui, "Show code").clicked() {
+                st.wifi_pair = Some(start_wifi_pair(ui.ctx()));
+            }
+        });
+        if let Some(wp) = &st.wifi_pair {
+            let status = wp.status.lock().unwrap().clone();
+            ui.add_space(8.0);
+            ui.horizontal(|ui| {
+                qr(ui, &wp.qr, 180.0);
+                ui.add_space(16.0);
+                ui.vertical(|ui| {
+                    ui.add_space(6.0);
+                    let (text, color) = match status.as_str() {
+                        "paired" => ("Paired. Super+P shows your phone over Wi-Fi now.".to_string(), GOOD()),
+                        s if s.starts_with("pairing") => ("Pairing…".to_string(), TEXT()),
+                        "timeout" => ("No phone scanned the code in time.".to_string(), WARN()),
+                        s if s.starts_with("failed") => (format!("Pairing failed: {}", s.trim_start_matches("failed ")), BAD()),
+                        _ => ("On the phone: Settings > System > Developer options > Wireless debugging > Pair device with QR code, then scan this.".to_string(), TEXT()),
+                    };
+                    ui.add(egui::Label::new(RichText::new(text).color(color)).wrap());
+                    ui.add_space(8.0);
+                    if ghost_button(ui, if status == "paired" { "Done" } else { "Cancel" }).clicked() {
+                        st.close_pair = true;
+                    }
+                });
+            });
+            ui.add_space(10.0);
+            if wp.started.elapsed() < Duration::from_secs(125) {
+                ui.ctx().request_repaint_after(Duration::from_millis(500));
+            }
+        }
     });
+
+    if st.close_pair {
+        st.close_pair = false;
+        st.wifi_pair = None;
+    }
 
     card(ui, "Other networks", |ui| {
         row_sub(

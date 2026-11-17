@@ -66,6 +66,8 @@ fn is_dialog_like(window: &Window, app_id: &str, title: &str) -> bool {
     let known = [
         "gcr-prompter", "polkit", "pinentry", "zenity", "kdialog", "nm-connection-editor", "pavucontrol", "blueman", "xdg-desktop-portal",
         "org.kde.kwalletd", "kwalletmanager", "seahorse", "gnome-keyring", "ksshaskpass", "lxqt-openssh-askpass", "org.freedesktop.impl.portal",
+        // the phone screen (oxide-ctl phone): a phone-shaped window, never squeezed into a tile
+        "scrcpy",
     ];
     if known.iter().any(|k| id.contains(k)) {
         return true;
@@ -190,6 +192,7 @@ impl Oxide {
             mv: None,
             open: None,
             size_deferred: false,
+            auto_float: false,
             held: None,
             fade: 1.0,
             fade_anim: None,
@@ -533,6 +536,28 @@ impl Oxide {
         self.kick_animations();
     }
 
+    /// The first frame of a floating window that chose its own size: centre it at that size (at most 90 % of the
+    /// usable area), instead of the default floating size.
+    pub fn float_to_client_size(&mut self, i: usize) {
+        let w = &self.wins[i];
+        let size = w.window.geometry().size;
+        if size.w < 80 || size.h < 80 {
+            return;
+        }
+        self.wins[i].auto_float = false;
+        let w = &self.wins[i];
+        let mi = self.shown_on(w.ws).unwrap_or(self.focused_mon);
+        let Some(m) = self.monitors.get(mi) else { return };
+        let Some(og) = self.space.output_geometry(&m.output) else { return };
+        let zone = smithay::desktop::layer_map_for_output(&m.output).non_exclusive_zone();
+        let area = Rectangle::new(og.loc + zone.loc, zone.size);
+        let bs = w.border.max(0);
+        let ww = (size.w + 2 * bs).min(area.size.w * 9 / 10);
+        let hh = (size.h + 2 * bs).min(area.size.h * 9 / 10);
+        self.wins[i].float_geo = Some(Rectangle::new((area.loc.x + (area.size.w - ww) / 2, area.loc.y + (area.size.h - hh) / 2).into(), (ww, hh).into()));
+        self.arrange();
+    }
+
     /// Chromium and Electron apps: their files sit next to the program (also for renamed Electron apps and inside
     /// Flatpaks, seen through /proc/PID/root). They get the size in two steps, see `apply_visual`.
     fn is_chromium(&self, i: usize) -> bool {
@@ -633,6 +658,13 @@ impl Oxide {
             let _ = x.configure(Rectangle::new(inner_loc, inner_size));
         }
         let first = (tiled || fullscreen) && win.window.toplevel().is_some_and(|t| !t.is_initial_configure_sent()) && self.is_chromium(i);
+        // a floating window without a size of its own yet: it picks one (a phone-shaped scrcpy, a small tool), and is
+        // centred at that size once it has drawn (see `float_to_client_size`)
+        let free = !tiled && !fullscreen && win.fixed.is_none() && win.window.toplevel().is_some_and(|t| !t.is_initial_configure_sent());
+        if free {
+            self.wins[i].auto_float = true;
+        }
+        let win = &self.wins[i];
         let defer = first || win.size_deferred;
         if first {
             let win = &mut self.wins[i];
@@ -652,7 +684,7 @@ impl Oxide {
         let win = &self.wins[i];
         if let Some(t) = win.window.toplevel() {
             t.with_pending_state(|st| {
-                st.size = if defer { first_size } else { Some(inner_size) };
+                st.size = if free { None } else if defer { first_size } else { Some(inner_size) };
                 for s in [TState::TiledLeft, TState::TiledRight, TState::TiledTop, TState::TiledBottom] {
                     if tiled {
                         st.states.set(s);
