@@ -43,3 +43,5 @@ Clipboard Clipboard.qml
 NotificationCenter NotificationCenter.qml
 LockScreen LockScreen.qml
 Segment Segment.qml
+Elastic Elastic.qml
+Arrive Arrive.qml

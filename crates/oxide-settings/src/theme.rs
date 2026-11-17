@@ -287,9 +287,14 @@ pub fn ease_out(t: f32) -> f32 {
 /// A value that follows its target like a physical spring (Material 3 spatial spring: stiffness 380, damping ratio
 /// 0.8). Interruptible: a new target keeps the current speed. Returns the current value.
 pub fn spring(ctx: &Context, id: egui::Id, target: f32) -> f32 {
+    spring_with(ctx, id, target, 380.0, 0.8)
+}
+
+/// `spring` with its own stiffness and damping ratio (Hearth: fast 800/0.6, move 380/0.8, enter 320/0.72).
+pub fn spring_with(ctx: &Context, id: egui::Id, target: f32, k: f32, ratio: f32) -> f32 {
     let dt = ctx.input(|i| i.stable_dt).clamp(0.0, 0.05);
     let (mut x, mut v) = ctx.data(|d| d.get_temp::<(f32, f32)>(id)).unwrap_or((target, 0.0));
-    let (k, c) = (380.0, 31.2);
+    let c = 2.0 * ratio * k.sqrt();
     // a few small steps per frame keep it stable
     for _ in 0..4 {
         let h = dt / 4.0;
@@ -305,4 +310,9 @@ pub fn spring(ctx: &Context, id: egui::Id, target: f32) -> f32 {
     }
     ctx.data_mut(|d| d.insert_temp(id, (x, v)));
     x
+}
+
+/// The light theme is on.
+pub fn is_light() -> bool {
+    PAL.read().map(|p| p.light).unwrap_or(false)
 }

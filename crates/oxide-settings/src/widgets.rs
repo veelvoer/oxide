@@ -82,8 +82,52 @@ pub fn start_page(ctx: &egui::Context) {
     ctx.data_mut(|d| d.insert_temp(egui::Id::new("page_t0"), now));
 }
 
+/// Called before a page is drawn: its cards count themselves, so they can arrive in order.
+pub fn begin_page(ctx: &egui::Context) {
+    ctx.data_mut(|d| d.insert_temp(egui::Id::new("card_n"), 0usize));
+}
+
+/// The expressive entrance (Hearth's springIn): when a page opens its cards rise a little and grow into place, one
+/// after another (38 ms apart). Only in the Material Expressive style.
+fn arrive<R>(ui: &mut Ui, f: impl FnOnce(&mut Ui) -> R) -> R {
+    if !expressive() {
+        return f(ui);
+    }
+    let ctx = ui.ctx().clone();
+    let n = ctx.data_mut(|d| {
+        let n = *d.get_temp_mut_or_insert_with(egui::Id::new("card_n"), || 0usize);
+        d.insert_temp(egui::Id::new("card_n"), n + 1);
+        n
+    });
+    let t0: f64 = ctx.data(|d| d.get_temp(egui::Id::new("page_t0"))).unwrap_or(0.0);
+    let id = egui::Id::new(("arrive", (t0 * 1000.0) as i64, n));
+    let waiting = page_age(&ctx) < n.min(8) as f32 * 0.038;
+    if ctx.data(|d| d.get_temp::<(f32, f32)>(id)).is_none() {
+        ctx.data_mut(|d| d.insert_temp(id, (0.0f32, 0.0f32)));
+    }
+    let a = spring_with(&ctx, id, if waiting { 0.0 } else { 1.0 }, 320.0, 0.72);
+    let o = ctx.animate_bool_with_time(id.with("o"), !waiting, 0.2);
+    if waiting {
+        ctx.request_repaint();
+    }
+    let rect = ui.available_rect_before_wrap();
+    let scale = 0.94 + 0.06 * a;
+    let origin = egui::pos2(rect.center().x, rect.top());
+    let t = egui::emath::TSTransform::from_translation(vec2(0.0, (1.0 - a) * 26.0) + origin.to_vec2() * (1.0 - scale))
+        * egui::emath::TSTransform::from_scaling(scale);
+    ui.scope(|ui| {
+        ui.multiply_opacity(o);
+        ui.with_visual_transform(t, f).inner
+    })
+    .inner
+}
+
 /// A group of rows: one flat container with hairline dividers. The title is plain sentence case above it.
 pub fn card<R>(ui: &mut Ui, title: &str, body: impl FnOnce(&mut Ui) -> R) -> R {
+    arrive(ui, |ui| plain_card(ui, title, body))
+}
+
+fn plain_card<R>(ui: &mut Ui, title: &str, body: impl FnOnce(&mut Ui) -> R) -> R {
     if !title.is_empty() {
         ui.add_space(10.0);
         ui.label(RichText::new(title.to_uppercase()).family(medium()).color(MUTED()).size(11.5).extra_letter_spacing(1.1));
@@ -406,11 +450,30 @@ fn m3_button(ui: &mut Ui, label: &str, fill: Color32, fg: Color32) -> egui::Resp
     let galley = ui.painter().layout_no_wrap(label.to_string(), egui::FontId::new(14.0, medium()), fg);
     let size = vec2(galley.size().x + 36.0, 36.0);
     let (rect, resp) = ui.allocate_exact_size(size, Sense::click());
-    let press = ui.ctx().animate_bool_with_time(resp.id.with("press"), resp.is_pointer_button_down_on(), 0.12);
+    let press = spring_with(ui.ctx(), resp.id.with("press"), resp.is_pointer_button_down_on() as u8 as f32, 800.0, 0.6).clamp(0.0, 1.3);
     let hover = tween(ui.ctx(), resp.id.with("hover"), resp.hovered() as u8 as f32, 0.12);
     let r = egui::lerp(rect.height() / 2.0..=9.0, press);
-    let shown = rect.shrink2(vec2(press * 3.0, press * 1.5));
+    // it leans toward the pointer while pressed and springs back past its rest (Hearth's elastic press)
+    let down = resp.is_pointer_button_down_on();
+    let (mut tx, mut ty) = (0.0, 0.0);
+    if let (true, Some(p)) = (down, ui.ctx().input(|i| i.pointer.interact_pos())) {
+        tx = ((p.x - rect.center().x) / (rect.width() / 2.0)).clamp(-1.0, 1.0);
+        ty = ((p.y - rect.center().y) / (rect.height() / 2.0)).clamp(-1.0, 1.0);
+    }
+    let (k, z) = if down { (550.0, 0.82) } else { (350.0, 0.52) };
+    let dx = spring_with(ui.ctx(), resp.id.with("dx"), tx, k, z);
+    let dy = spring_with(ui.ctx(), resp.id.with("dy"), ty, k, z);
+    let shown = rect.shrink2(vec2(press * 3.0, press * 1.5)).translate(vec2(dx, dy) * 2.0);
     ui.painter().rect_filled(shown, r, lerp_color(fill, fg, hover * 0.08 + press * 0.06));
+    if press > 0.01 {
+        // the light under the pointer
+        if let Some(p) = ui.ctx().input(|i| i.pointer.interact_pos()).filter(|_| down) {
+            let light = if crate::theme::is_light() { ACCENT() } else { Color32::WHITE };
+            for (k, a) in [(1.0f32, 0.05f32), (0.6, 0.05), (0.3, 0.05)] {
+                ui.painter_at(shown).circle_filled(p, shown.width() * 0.5 * k, light.gamma_multiply(a * press));
+            }
+        }
+    }
     ui.painter().galley(shown.center() - galley.size() / 2.0, galley, fg);
     resp.on_hover_cursor(egui::CursorIcon::PointingHand)
 }

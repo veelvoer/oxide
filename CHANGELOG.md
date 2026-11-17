@@ -2,6 +2,10 @@
 
 ## 0.2.0 (unreleased)
 
+* New: **your phone on the PC** (Super+P): its screen with very little delay, usable while it is locked in your pocket.
+* New: Hearth's expressive motion: elastic presses with light and ring, staggered entrances, morphing chips.
+* Faster panels: key binds reach the shell directly (no process start), the launcher searches a prepared index and
+  loads icons in the background.
 * New: **Material Expressive** style for the whole desktop and the phone app (Settings → Theme → Style).
 * New: phone app finds a PC again on any network it moves to; encrypted notes work without port forwarding.
 * Fixed: sliders in Settings (clean thick track, solid handle, nothing past the handle), the border color bar has rounded ends.

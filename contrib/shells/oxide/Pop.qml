@@ -35,10 +35,14 @@ PanelWindow {
     }
     // unmapped while hidden, so a hidden popup can never sit over the visible one (the compositor tolerates the
     // destroy now; it used to drop clients that did that)
-    visible: shown || box.opacity > 0.01
+    // warm: the window stays mapped while closed (empty and click-through), so opening it is instant instead of
+    // waiting a few hundred milliseconds for a new window; for the panels opened most (launcher, quick settings)
+    property bool warm: false
+    visible: warm || shown || box.opacity > 0.01
     color: "transparent"
-    mask: modal ? null : boxRegion
+    mask: !shown && box.opacity < 0.01 ? nothing : (modal ? null : boxRegion)
     Region { id: boxRegion; item: box }
+    Region { id: nothing }
     anchors { top: true; bottom: true; left: true; right: true }
     exclusionMode: ExclusionMode.Ignore
     WlrLayershell.layer: WlrLayer.Overlay
@@ -84,18 +88,19 @@ PanelWindow {
         // it grows out of the corner it hangs from (the bar button you clicked) and settles with a tiny overshoot
         transformOrigin: win.place === "top-center" || win.place === "window" ? Item.Top : win.place === "center" ? Item.Center
                        : win.place === "right" ? Item.Right : (win.barOnTop ? Item.TopRight : Item.BottomRight)
-        // Expressive: it grows from further away and springs past full size before it settles; closing is quick
-        scale: win.shown ? 1 : (Theme.expressive ? 0.8 : 0.9)
+        // it rises a little and grows into place, settling softly (Expressive); closing is quick and plain
+        scale: win.shown ? 1 : 0.94
+        transform: Translate { y: win.shown ? 0 : (win.barOnTop ? -1 : 1) * (Theme.expressive ? 18 : 8) * (win.place === "center" ? -1 : 1); Behavior on y { NumberAnimation { duration: win.shown ? Theme.enterMs : Theme.fast * 1.4; easing.type: win.shown ? Easing.OutBack : Easing.InCubic; easing.overshoot: Theme.expressive ? Theme.enterOvershoot : 0.4 } } }
         Behavior on opacity { NumberAnimation { duration: win.shown ? Theme.normal : Theme.fast * 1.4; easing.type: Easing.OutCubic } }
         Behavior on scale {
             NumberAnimation {
-                duration: win.shown ? (Theme.expressive ? 420 * Theme.motionScale : 280) : (Theme.expressive ? 170 * Theme.motionScale : 280)
+                duration: win.shown ? (Theme.expressive ? Theme.enterMs : 280) : Theme.fast * 1.4
                 easing.type: win.shown ? Easing.OutBack : Easing.InCubic
-                easing.overshoot: Theme.expressive ? 1.6 : 1.2
+                easing.overshoot: Theme.expressive ? Theme.enterOvershoot : 0.8
             }
         }
-        // when the content changes size (a list opens, results come in) the panel morphs to the new size
-        Behavior on height { enabled: win.shown; NumberAnimation { duration: Theme.spatial; easing.type: Theme.spatialType; easing.overshoot: Theme.expressive ? 0.7 : 0.6 } }
+        // when the content changes size (results come in while you type) the panel follows calmly: no wobble
+        Behavior on height { enabled: win.shown; NumberAnimation { duration: Theme.normal; easing.type: Easing.OutCubic } }
 
         // clicks inside the box must not close it
         MouseArea { anchors.fill: parent }

@@ -63,6 +63,25 @@ pub fn page(app: &mut App, ui: &mut Ui) {
         row_full(ui, None, "Wake-on-LAN", &sub, "", true, |_| {});
     });
 
+    card(ui, "Phone screen", |ui| {
+        let ready = ["scrcpy", "adb"].iter().all(|b| std::env::var_os("PATH").is_some_and(|p| std::env::split_paths(&p).any(|d| d.join(b).is_file())));
+        let sub = if ready {
+            "Your phone's screen in a window, with almost no delay. It works while the phone is locked in your pocket: its own screen stays dark."
+        } else {
+            "Needs scrcpy and adb (packages scrcpy and android-tools)."
+        };
+        row_sub(ui, "cellphone", "Show my phone", sub, false, |ui| {
+            if ready && primary_button(ui, "Show  (Super+P)").clicked() {
+                let _ = std::process::Command::new("oxide-ctl").arg("phone").spawn();
+            }
+        });
+        row_sub(ui, "lan-connect", "Set up over Wi-Fi", "Once, with the phone on USB (USB debugging on). After that no cable is needed.", true, |ui| {
+            if ready && ghost_button(ui, "Set up phone screen").clicked() {
+                let _ = std::process::Command::new("oxide-ctl").args(["phone", "setup"]).spawn();
+            }
+        });
+    });
+
     card(ui, "Other networks", |ui| {
         row_sub(
             ui,

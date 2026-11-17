@@ -422,11 +422,16 @@ pub struct RemoteCfg {
     /// Leave an encrypted note with this PC's current addresses, so paired phones find it on any network (also
     /// when the network blocks the search). Only the phones can read it.
     pub notes: bool,
+    /// The phone's screen on the PC (oxide-ctl phone, Super+P): longest side in pixels, video bit rate in Mbit/s,
+    /// and whether its sound plays on the PC too.
+    pub phone_max_size: u32,
+    pub phone_bitrate: u32,
+    pub phone_audio: bool,
 }
 
 impl Default for RemoteCfg {
     fn default() -> Self {
-        Self { enabled: false, anywhere: false, rendezvous: "https://ntfy.sh".into(), notes: true }
+        Self { enabled: false, anywhere: false, rendezvous: "https://ntfy.sh".into(), notes: true, phone_max_size: 1600, phone_bitrate: 12, phone_audio: false }
     }
 }
 
@@ -616,6 +621,8 @@ impl Default for Config {
             b("SUPER", "z", Exec("oxide-ctl ipc shell toggleControl".into())),
             b("SUPER", "o", Exec("oxide-ctl ipc shell toggleWindow".into())),
             b("SUPER", "d", Exec("oxide-ctl ipc shell toggleLauncher".into())),
+            // the phone's screen in a window (scrcpy)
+            b("SUPER", "p", Exec("oxide-ctl phone".into())),
             // Alt + J K I L act as the arrow keys everywhere (add Shift or Ctrl to select or jump words)
             b("ALT", "j", SendKey("Left".into())),
             b("ALT", "k", SendKey("Down".into())),
@@ -694,6 +701,8 @@ impl Default for Config {
             rules: ["codium", "codium-url-handler", "VSCodium", "code"]
                 .iter()
                 .map(|c| WindowRule { app_id: Some((*c).into()), opacity: Some(0.92), ..WindowRule::default() })
+                // the phone's screen floats, at the phone's own size
+                .chain(std::iter::once(WindowRule { app_id: Some("scrcpy".into()), floating: Some(true), ..WindowRule::default() }))
                 .collect(),
             scratchpads: vec![],
             remote: RemoteCfg::default(),
@@ -807,7 +816,7 @@ impl Config {
 
     /// Older config files do not know the shell shortcuts: add them unless the key is taken.
     pub fn add_missing_shell_binds(&mut self) {
-        for d in Config::default().binds.into_iter().filter(|b| matches!(&b.action, Action::SendKey(_)) || (matches!(&b.action, Action::Exec(c) if c.contains("active-shell") || c.starts_with("oxide-ctl ipc ")) || matches!(&b.action, Action::ToggleOverview))) {
+        for d in Config::default().binds.into_iter().filter(|b| matches!(&b.action, Action::SendKey(_)) || (matches!(&b.action, Action::Exec(c) if c.contains("active-shell") || c.starts_with("oxide-ctl ipc ") || c == "oxide-ctl phone") || matches!(&b.action, Action::ToggleOverview))) {
             let taken = self.binds.iter().any(|b| b.mods.eq_ignore_ascii_case(&d.mods) && b.key.eq_ignore_ascii_case(&d.key));
             let has_action = self.binds.iter().any(|b| b.action == d.action);
             if !taken && !has_action {

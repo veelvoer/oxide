@@ -14,12 +14,10 @@ Rectangle {
     implicitHeight: Theme.expressive ? 32 : 28
     // Expressive: round; pressing squashes it into a rounded square and back (a shape morph)
     radius: Theme.expressive ? (mouse.pressed ? 10 : height / 2) : Theme.rControl
-    scale: Theme.expressive && mouse.pressed ? 0.92 : 1
     color: active ? (Theme.expressive ? Theme.container : Theme.alpha(Theme.accent, 0.2))
          : (mouse.containsMouse ? (Theme.expressive ? Theme.surfaceHighest : Theme.raised) : Theme.clear(Theme.raised))
     Behavior on color { ColorAnimation { duration: Theme.fast } }
     Behavior on radius { NumberAnimation { duration: Theme.normal; easing.type: Easing.OutBack; easing.overshoot: 1.6 } }
-    Behavior on scale { NumberAnimation { duration: Theme.normal; easing.type: Easing.OutBack; easing.overshoot: 2.0 } }
 
     Icon {
         anchors.centerIn: parent
@@ -35,4 +33,5 @@ Rectangle {
         acceptedButtons: Qt.LeftButton | Qt.RightButton
         onClicked: m => m.button === Qt.RightButton ? root.rightClicked() : root.clicked()
     }
+    Elastic { radius: root.radius }
 }

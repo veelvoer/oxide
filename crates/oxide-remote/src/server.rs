@@ -124,7 +124,8 @@ fn pair(mut c: TcpStream, sh: Shared, phone_id: String, phone_name: String, epk:
     {
         let mut st = sh.store.lock().unwrap();
         st.phones.retain(|p| p.id != phone_id);
-        st.phones.push(Phone { id: phone_id, name: phone_name.clone(), ltk: hex(&ltk), paired: store::now(), last_seen: store::now() });
+        let ip = c.peer_addr().map(|a| a.ip().to_string()).unwrap_or_default();
+        st.phones.push(Phone { id: phone_id, name: phone_name.clone(), ltk: hex(&ltk), paired: store::now(), last_seen: store::now(), ip });
         st.save();
         sh.pairing.lock().unwrap().code = None;
     }
@@ -158,6 +159,11 @@ fn session(mut c: TcpStream, sh: Shared, phone_id: String, nonce: String) -> std
     if let Ok(mut st) = sh.store.lock() {
         if let Some(p) = st.phones.iter_mut().find(|p| p.id == phone_id) {
             p.last_seen = store::now();
+            if let Ok(a) = c.peer_addr() {
+                if is_local(a.ip()) {
+                    p.ip = a.ip().to_string();
+                }
+            }
         }
         st.save();
     }

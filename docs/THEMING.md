@@ -70,7 +70,10 @@ Own shells read the same file: see [SHELLS.md](SHELLS.md).
   surfaces in tinted steps, a vivid primary, tonal containers. Dark and light both work.
 * **Shape**: pill-shaped controls, big soft cards and panels (corners 14 to 24), floating island bar, gaps between
   windows.
-* **Motion**: Material's spring curves. Panels grow out of the bar with a small overshoot, switches and buttons
+* **Motion**: springs, with the values of the Hearth app: presses lean toward the pointer, a soft light follows it
+  and a ring spreads from the click, then they spring back; panels rise and grow into place and their parts arrive one
+  after another; chips round into pills with a check when chosen.
+* **Motion details**: Material's spring curves. Panels grow out of the bar with a small overshoot, switches and buttons
   squash while pressed and spring back, the workspace highlight stretches as it moves, the selected page in
   Settings is one pill that springs between items, notifications spring in and can be swiped away.
 * **Cost**: the same GPU-friendly animations as before (position, scale, opacity, color), nothing is drawn

@@ -40,6 +40,8 @@ pub struct Store {
     pub touchpad: bool,
     /// "phone" (Material You), "pc" (the last PC's Oxide theme), "dark", "light"
     pub theme: String,
+    /// keep wireless debugging on, so the PCs can show this phone's screen
+    pub show_on_pc: bool,
     #[serde(skip)]
     pub dir: PathBuf,
 }

@@ -230,6 +230,8 @@ pub struct Oxide {
     pub constraint_surface: Option<WlSurface>,
     pub blurs: HashMap<String, crate::blur::Blur>,
     pub ipc_subs: Vec<std::os::unix::net::UnixStream>,
+    /// the bundled shell's connection: it takes direct calls (see `shell_call`)
+    pub shell_subs: Vec<std::os::unix::net::UnixStream>,
     pub last_state_json: String,
     pub scroll_accum: f64,
     pub shell: Option<crate::shell::ShellProc>,
@@ -381,6 +383,7 @@ impl Oxide {
             idle_inhibitors: Default::default(),
             hide_cursor: false,
             ipc_subs: vec![],
+            shell_subs: vec![],
             last_state_json: String::new(),
             scroll_accum: 0.0,
             blurs: HashMap::new(),

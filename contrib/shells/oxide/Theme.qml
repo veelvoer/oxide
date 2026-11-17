@@ -66,6 +66,14 @@ Singleton {
     readonly property int spatialType: expressive ? Easing.OutBack : Easing.OutCubic
     readonly property real overshoot: expressive ? 1.25 : 0.6
     readonly property int spatial: (expressive ? 420 : 260) * motionScale
+    // Hearth's springs, as eased curves: fast (presses, chips: damping 0.6, stiffness 800), move (anything that
+    // travels: 0.8, 380), enter (things arriving: 0.72, 320); fades never overshoot
+    readonly property int fastMs: 260 * motionScale
+    readonly property real fastOvershoot: 1.5
+    readonly property int moveMs: 420 * motionScale
+    readonly property real moveOvershoot: 0.7
+    readonly property int enterMs: 520 * motionScale
+    readonly property real enterOvershoot: 0.9
 
     function alpha(c, a) { return Qt.rgba(c.r, c.g, c.b, a); }
     // "off" state of a colour that fades in: the same colour at zero alpha. Animating from plain "transparent" passes

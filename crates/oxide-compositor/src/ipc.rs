@@ -55,12 +55,18 @@ fn listen(handle: &LoopHandle<'static, Oxide>) {
                 continue;
             }
             let resp = match serde_json::from_str::<Request>(&line) {
-                Ok(Request::Subscribe) => {
+                Ok(r @ (Request::Subscribe | Request::SubscribeShell)) => {
+                    let shell = matches!(r, Request::SubscribeShell);
                     // keep the stream: it receives a `state` line now and on every change
                     let resp = Response::State { state: state.state_info() };
                     let mut out = serde_json::to_string(&resp).unwrap_or_default();
                     out.push('\n');
                     if stream.set_nonblocking(true).is_ok() && (&stream).write_all(out.as_bytes()).is_ok() {
+                        if shell {
+                            if let Ok(s) = stream.try_clone() {
+                                state.shell_subs.push(s);
+                            }
+                        }
                         state.ipc_subs.push(stream);
                     }
                     continue;
@@ -137,7 +143,7 @@ impl Oxide {
                 Response::Ok
             }
             Request::GetState => Response::State { state: self.state_info() },
-            Request::Subscribe => Response::Ok,
+            Request::Subscribe | Request::SubscribeShell => Response::Ok,
             Request::Input { input } => match self.inject(input) {
                 Ok(()) => Response::Ok,
                 Err(message) => Response::Error { message },
@@ -187,6 +193,14 @@ impl Oxide {
 }
 
 impl Oxide {
+    /// Ask the bundled shell to run one of its functions (toggleLauncher, toggleWindow, …) over its open
+    /// connection. False when no such shell listens (then the caller starts `quickshell ipc call` as before).
+    pub fn shell_call(&mut self, call: &str) -> bool {
+        let line = format!("{}\n", serde_json::json!({ "status": "call", "call": call }));
+        self.shell_subs.retain(|s| (&*s).write_all(line.as_bytes()).is_ok());
+        !self.shell_subs.is_empty()
+    }
+
     /// Push the current state to every subscriber if it changed since the last push.
     pub fn broadcast_state(&mut self) {
         if self.ipc_subs.is_empty() {

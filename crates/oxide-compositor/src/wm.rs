@@ -879,7 +879,16 @@ impl Oxide {
 
     pub fn dispatch_action(&mut self, action: &Action) {
         match action {
-            Action::Exec(cmd) => self.spawn(cmd),
+            Action::Exec(cmd) => {
+                // panels of the bundled shell open without starting a process when it is listening
+                let call = match cmd.trim() {
+                    "oxide-ctl launcher" => Some("toggleLauncher"),
+                    c => c.strip_prefix("oxide-ctl ipc shell ").filter(|f| !f.contains(' ')),
+                };
+                if !call.is_some_and(|c| self.shell_call(c)) {
+                    self.spawn(cmd);
+                }
+            }
             Action::Close => {
                 if let Some(w) = self.focused_idx().map(|i| self.wins[i].window.clone()) {
                     if let Some(t) = w.toplevel() {

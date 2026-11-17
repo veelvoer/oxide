@@ -11,6 +11,7 @@ Pop {
     contentWidth: 560
     contentHeight: 76 + list.height + (list.count > 0 ? 14 : 0)
     wantsKeyboard: true
+    warm: true
 
     property string query: ""
     property var opts: ({})
@@ -39,6 +40,17 @@ Pop {
         } catch (e) { return null; }
     }
 
+    // every app once, with the lowercase texts the search compares against
+    property var appIndex: []
+    function buildIndex() {
+        appIndex = DesktopEntries.applications.values.filter(a => !a.noDisplay).map(a => ({
+            entry: a, name: a.name.toLowerCase(), generic: (a.genericName || "").toLowerCase(),
+            keywords: (a.keywords || []).map(k => k.toLowerCase())
+        }));
+    }
+    Component.onCompleted: buildIndex()
+    Connections { target: DesktopEntries.applications; function onValuesChanged() { root.buildIndex(); } }
+
     readonly property var results: {
         const q = query.trim(), ql = q.toLowerCase();
         const out = [];
@@ -50,20 +62,22 @@ Pop {
         const r = calc(q);
         if (r !== null) out.push({ kind: "calc", name: r, sub: q + " =", arg: r });
         const hist = opts.history !== false;
-        const apps = DesktopEntries.applications.values.filter(a => !a.noDisplay && (ql === "" || a.name.toLowerCase().includes(ql)
-            || (a.genericName || "").toLowerCase().includes(ql) || (a.keywords || []).some(k => k.toLowerCase().includes(ql))));
+        // the index is built once (and when apps change): opening and typing stay fast
+        const apps = appIndex.filter(x => ql === "" || x.name.includes(ql) || x.generic.includes(ql) || x.keywords.some(k => k.includes(ql)));
         // most used first (or most recent first with "sort": "recent"), then alphabetical
         const info = id => {
             const v = counts[id];
             return typeof v === "number" ? { n: v, t: 0 } : (v || { n: 0, t: 0 });
         };
         apps.sort((a, b) => {
-            const as = ql !== "" && a.name.toLowerCase().startsWith(ql) ? 0 : 1, bs = ql !== "" && b.name.toLowerCase().startsWith(ql) ? 0 : 1;
-            const ia = hist ? info(a.id) : { n: 0, t: 0 }, ib = hist ? info(b.id) : { n: 0, t: 0 };
+            const as = ql !== "" && a.name.startsWith(ql) ? 0 : 1, bs = ql !== "" && b.name.startsWith(ql) ? 0 : 1;
+            const ia = hist ? info(a.entry.id) : { n: 0, t: 0 }, ib = hist ? info(b.entry.id) : { n: 0, t: 0 };
             const byUse = ib.n - ia.n, byTime = ib.t - ia.t;
-            return as - bs || (opts.sort === "recent" ? byTime || byUse : byUse || byTime) || a.name.localeCompare(b.name);
+            // plain comparison of prepared lowercase names (localeCompare is slow in QML's JavaScript)
+            return as - bs || (opts.sort === "recent" ? byTime || byUse : byUse || byTime) || (a.name < b.name ? -1 : a.name > b.name ? 1 : 0);
         });
-        for (const a of apps) out.push({ kind: "app", name: a.name, sub: a.genericName || "", icon: a.icon, entry: a });
+        // enough to scroll through with the arrow keys; building rows nobody sees only costs time
+        for (const x of apps.slice(0, 50)) out.push({ kind: "app", name: x.entry.name, sub: x.entry.genericName || "", icon: x.entry.icon, entry: x.entry });
         if (q !== "" && opts.web !== false && out.length < root.maxResults) out.push({ kind: "web", name: "Search the web for " + q, sub: "", arg: q });
         return out;
     }
@@ -134,7 +148,7 @@ Pop {
                 height: Theme.expressive && list.currentItem ? list.currentItem.height : height
                 radius: Theme.expressive ? height / 2 : Theme.rBox
                 color: Theme.expressive ? Theme.secondaryContainer : Theme.alpha(Theme.accent, 0.2)
-                Behavior on y { enabled: Theme.expressive; NumberAnimation { duration: Theme.spatial; easing.type: Easing.OutBack; easing.overshoot: 1.1 } }
+                Behavior on y { enabled: Theme.expressive; NumberAnimation { duration: Theme.fastMs; easing.type: Easing.OutBack; easing.overshoot: 1.0 } }
             }
             highlightMoveDuration: 150
             highlightMoveVelocity: -1
@@ -161,6 +175,9 @@ Pop {
                         source: item.modelData.icon ? Quickshell.iconPath(item.modelData.icon, true) : ""
                         sourceSize: Qt.size(60, 60)
                         smooth: true
+                        // decoded off the main thread: the list shows at once, icons follow a moment later
+                        asynchronous: true
+                        cache: true
                     }
                     Icon {
                         visible: item.modelData.kind !== "app"
@@ -177,6 +194,8 @@ Pop {
                 // one highlight only: moving the pointer onto a row selects it (a row that merely appears under a still pointer does not)
                 HoverHandler { id: hover; cursorShape: Qt.PointingHandCursor; onPointChanged: if (hovered) list.currentIndex = item.index }
                 TapHandler { onTapped: { list.currentIndex = item.index; root.launch(); } }
+                Arrive { when: root.shown; order: item.index }
+                Elastic { radius: item.height / 2 }
             }
         }
     }

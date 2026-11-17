@@ -19,6 +19,9 @@ pub enum Request {
     GetState,
     /// Keep the connection open; a `state` response is pushed on every change.
     Subscribe,
+    /// Like `Subscribe`, from the bundled shell: it also receives `{"status":"call","call":"<function>"}` lines, so
+    /// key binds open its panels without starting a process (much faster than `quickshell ipc call`).
+    SubscribeShell,
     /// Synthesize keyboard or pointer input (used by automation and the AI assistant).
     Input { input: InputCmd },
     /// Stop and start the configured Quickshell shell again.

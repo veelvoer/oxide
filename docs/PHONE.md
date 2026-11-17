@@ -42,6 +42,20 @@ adb install OxideRemote-*.apk
 `scripts/release.sh` builds it and publishes it as a GitHub release, where the app's **Update** button finds it.
 An update installs only over an app signed with the same key, so keep the key you build with.
 
+## Your phone on the PC
+
+**Super+P** (or *Settings → Phone → Show my phone*) opens your phone's screen in a window, with very little delay
+(scrcpy: the phone's own video encoder, typically 35–70 ms on good Wi-Fi). You can use it with mouse and keyboard
+while the phone stays locked in your pocket: its own screen stays dark, a locked phone shows its lock screen and you
+type the PIN on the PC. Closing the window turns the phone's screen off again. Super+P again closes it.
+
+Setup, once: install `scrcpy` and `android-tools`, turn on USB debugging on the phone (Developer options), connect it
+with USB and press *Settings → Phone → Set up phone screen*. From then on it works over Wi-Fi. A phone restart turns
+Wi-Fi debugging off; with **Show this phone on my PCs** on in the app (its settings), the app switches Android's
+wireless debugging back on whenever it starts, and the PC finds the phone by itself.
+
+`[remote] phone_max_size` (1600), `phone_bitrate` (12, Mbit/s), `phone_audio` (false: the phone's sound stays on the phone).
+
 ## Other networks (school, work, a friend's)
 
 The phone remembers each PC for good. When a PC is not at its last address (it is on another network, or got a new

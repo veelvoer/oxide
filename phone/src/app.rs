@@ -120,6 +120,8 @@ pub struct App {
     confirm: Option<Confirm>,
     sheet: Option<usize>,
     update: Update,
+    last_view: Option<(Page, Tab)>,
+    epoch: u64,
 }
 
 fn human_bytes(b: u64) -> String {
@@ -205,8 +207,14 @@ impl App {
             confirm: None,
             sheet: None,
             update: Update::default(),
+            last_view: None,
+            epoch: 0,
         };
         a.refresh_theme();
+        // wireless debugging turns itself off on another network or after a restart: switch it back on
+        if a.store.show_on_pc && platform::can_show_on_pc() {
+            platform::set_show_on_pc(true);
+        }
         if a.store.pcs.is_empty() {
             a.page = Page::Add;
             a.scan();
@@ -372,6 +380,13 @@ impl App {
 
     pub fn frame(&mut self, ui: &mut Ui) {
         let ctx = ui.ctx().clone();
+        // another page (or tab): its cards arrive again
+        let key = (self.page, self.tab);
+        if self.last_view != Some(key) {
+            self.last_view = Some(key);
+            self.epoch += 1;
+        }
+        ui::begin_frame(&ctx, self.epoch);
         self.refresh_platform();
         self.poll(&ctx);
         let p = pal();
@@ -1053,6 +1068,30 @@ impl App {
                 if ui::segmented(ui, &[(ic::MOUSE, "Touchpad"), (ic::TAP, "Tap")], &mut t) {
                     self.store.touchpad = t == 0;
                     self.store.save();
+                }
+            });
+            ui::section(ui, "On my PCs");
+            ui::card(ui, |ui| {
+                let allowed = platform::can_show_on_pc();
+                let mut on = self.store.show_on_pc && allowed;
+                let sub = if allowed {
+                    "Super+P on the PC shows this screen, also while the phone is locked in your pocket."
+                } else {
+                    "Once: connect the phone with USB and choose Settings > Phone > Set up phone screen on the PC."
+                };
+                ui::row(ui, ic::MONITOR, "Show this phone on my PCs", sub, |ui| {
+                    ui.add_enabled_ui(allowed, |ui| {
+                        if tap(&ui::chip(ui, Some(if on { ic::CHECK } else { ic::PLUS }), if on { "On" } else { "Off" }, on)) {
+                            on = !on;
+                        }
+                    });
+                });
+                if allowed && on != self.store.show_on_pc {
+                    self.store.show_on_pc = on;
+                    self.store.save();
+                    if !platform::set_show_on_pc(on) {
+                        self.toast = Some(("Could not switch wireless debugging".into(), Instant::now()));
+                    }
                 }
             });
             ui::section(ui, "Updates");

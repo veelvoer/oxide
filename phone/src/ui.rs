@@ -88,12 +88,153 @@ pub fn icon(ui: &mut Ui, glyph: &str, size: f32, color: Color32) -> Response {
     resp
 }
 
-/// Pressed look: a soft veil over the shape while the finger is on it.
-fn veil(ui: &Ui, resp: &Response, rect: Rect, radius: f32, color: Color32) {
-    let t = ui.ctx().animate_bool_with_time(resp.id.with("press"), resp.is_pointer_button_down_on(), 0.08);
-    if t > 0.0 {
-        ui.painter().rect_filled(rect, radius, color.gamma_multiply(0.12 * t));
+/// A value that follows its target like a physical spring (mass 1). Interruptible: a new target keeps the speed.
+/// Hearth's springs: fast (damping 0.6, stiffness 800), move (0.8, 380), enter (0.72, 320), release (0.52, 350).
+pub fn spring(ctx: &egui::Context, id: egui::Id, target: f32, stiffness: f32, ratio: f32) -> f32 {
+    let dt = ctx.input(|i| i.stable_dt).clamp(0.0, 0.05);
+    let (mut x, mut v) = ctx.data(|d| d.get_temp::<(f32, f32)>(id)).unwrap_or((target, 0.0));
+    let c = 2.0 * ratio * stiffness.sqrt();
+    for _ in 0..4 {
+        let h = dt / 4.0;
+        let a = -stiffness * (x - target) - c * v;
+        v += a * h;
+        x += v * h;
     }
+    if (x - target).abs() < 0.0005 && v.abs() < 0.005 {
+        x = target;
+        v = 0.0;
+    } else {
+        ctx.request_repaint();
+    }
+    ctx.data_mut(|d| d.insert_temp(id, (x, v)));
+    x
+}
+
+/// The outline of a rounded rectangle, as points (for soft fills that stay inside the shape).
+fn rounded_outline(rect: Rect, r: f32) -> Vec<Pos2> {
+    let r = r.min(rect.width() / 2.0).min(rect.height() / 2.0);
+    let mut pts = vec![];
+    let corners = [
+        (Pos2::new(rect.right() - r, rect.top() + r), -90.0f32),
+        (Pos2::new(rect.right() - r, rect.bottom() - r), 0.0),
+        (Pos2::new(rect.left() + r, rect.bottom() - r), 90.0),
+        (Pos2::new(rect.left() + r, rect.top() + r), 180.0),
+    ];
+    for (c, start) in corners {
+        for k in 0..=6 {
+            let a = (start + 90.0 * k as f32 / 6.0).to_radians();
+            pts.push(Pos2::new(c.x + r * a.cos(), c.y + r * a.sin()));
+        }
+    }
+    pts
+}
+
+/// The expressive press (as in Hearth): returns (offset, scale) for the pressed thing and paints the light under the
+/// finger and the ring that spreads from the touch, inside `rect`'s rounded shape. Call it every frame.
+pub fn elastic(ui: &Ui, resp: &Response, rect: Rect, radius: f32) -> (Vec2, f32) {
+    let ctx = ui.ctx().clone();
+    let id = resp.id.with("elastic");
+    let down = resp.is_pointer_button_down_on();
+    let pos = ctx.input(|i| i.pointer.interact_pos());
+    let (mut tx, mut ty) = (0.0, 0.0);
+    if let (true, Some(p)) = (down, pos) {
+        tx = ((p.x - rect.center().x) / (rect.width() / 2.0)).clamp(-1.0, 1.0);
+        ty = ((p.y - rect.center().y) / (rect.height() / 2.0)).clamp(-1.0, 1.0);
+        ctx.data_mut(|d| d.insert_temp(id.with("at"), p));
+    }
+    // a new touch: the ring starts where the finger is
+    let was = ctx.data(|d| d.get_temp::<bool>(id.with("down"))).unwrap_or(false);
+    if down && !was {
+        ctx.data_mut(|d| d.insert_temp(id.with("ring"), (pos.unwrap_or(rect.center()), ctx.input(|i| i.time))));
+    }
+    ctx.data_mut(|d| d.insert_temp(id.with("down"), down));
+    let (k, ratio) = if down { (550.0, 0.82) } else { (350.0, 0.52) };
+    let dx = spring(&ctx, id.with("dx"), tx, k, ratio);
+    let dy = spring(&ctx, id.with("dy"), ty, k, ratio);
+    // a big card gives a little, a small button more
+    let squeeze = (1.0 - 10.0 / rect.width().max(rect.height()).max(1.0)).clamp(0.94, 0.985);
+    let s = spring(&ctx, id.with("s"), if down { squeeze } else { 1.0 }, if down { 1200.0 } else { 420.0 }, if down { 1.0 } else { 0.55 });
+    let glow = ctx.animate_bool_with_time(id.with("glow"), down, if down { 0.12 } else { 0.28 });
+    let p = pal();
+    let light = if p.dark { Color32::WHITE } else { p.accent };
+    let shown = Rect::from_center_size(rect.center() + vec2(dx, dy) * 2.0, rect.size() * s);
+    if glow > 0.01 {
+        // a fan from the finger to the outline: bright at the finger, nothing at the edge, never outside the shape
+        let at = ctx.data(|d| d.get_temp::<Pos2>(id.with("at"))).unwrap_or(rect.center());
+        let at = Pos2::new(at.x.clamp(shown.left() + 1.0, shown.right() - 1.0), at.y.clamp(shown.top() + 1.0, shown.bottom() - 1.0));
+        let outline = rounded_outline(shown, radius * s);
+        let mut mesh = egui::Mesh::default();
+        mesh.colored_vertex(at, light.gamma_multiply((if p.dark { 0.2 } else { 0.16 }) * glow));
+        for q in &outline {
+            mesh.colored_vertex(*q, Color32::TRANSPARENT);
+        }
+        let n = outline.len() as u32;
+        for i in 0..n {
+            mesh.add_triangle(0, 1 + i, 1 + (i + 1) % n);
+        }
+        ui.painter().add(egui::Shape::mesh(mesh));
+    }
+    if let Some((o, t0)) = ctx.data(|d| d.get_temp::<(Pos2, f64)>(id.with("ring"))) {
+        let t = ((ctx.input(|i| i.time) - t0) / 0.46) as f32;
+        if t < 1.0 {
+            let e = 1.0 - (1.0 - t).powi(3);
+            let r = rect.width().max(rect.height()) * 1.0 * e;
+            ui.painter_at(shown).circle_stroke(o, r, Stroke::new(r * 0.22 + 1.0, light.gamma_multiply(0.12 * (1.0 - t))));
+            ctx.request_repaint();
+        }
+    }
+    (vec2(dx, dy) * 2.0, s)
+}
+
+/// The expressive entrance (as in Hearth): the first time it is shown (for each `epoch`, e.g. each time a page
+/// opens) the content rises a little and grows into place, one item after another (`order`, 38 ms apart).
+pub fn arrive<R>(ui: &mut Ui, id: egui::Id, order: usize, f: impl FnOnce(&mut Ui) -> R) -> R {
+    let ctx = ui.ctx().clone();
+    let now = ctx.input(|i| i.time);
+    let start = ctx.data_mut(|d| *d.get_temp_mut_or_insert_with(id.with("arrive"), || now + (order.min(8) as f64) * 0.038));
+    let waiting = now < start;
+    let target = if waiting { 0.0 } else { 1.0 };
+    // starts at 0 the first time (the spring is created at its target, so set it to 0 first)
+    if ctx.data(|d| d.get_temp::<(f32, f32)>(id.with("a"))).is_none() {
+        ctx.data_mut(|d| d.insert_temp(id.with("a"), (0.0f32, 0.0f32)));
+    }
+    let a = spring(&ctx, id.with("a"), target, 320.0, 0.72);
+    let o = ctx.animate_bool_with_time(id.with("o"), !waiting, 0.2);
+    if waiting {
+        ctx.request_repaint();
+    }
+    let rect = ui.available_rect_before_wrap();
+    let scale = 0.94 + 0.06 * a;
+    let origin = Pos2::new(rect.center().x, rect.top());
+    let t = egui::emath::TSTransform::from_translation(vec2(0.0, (1.0 - a) * 26.0) + origin.to_vec2() * (1.0 - scale))
+        * egui::emath::TSTransform::from_scaling(scale);
+    ui.scope(|ui| {
+        ui.multiply_opacity(o);
+        ui.with_visual_transform(t, f).inner
+    })
+    .inner
+}
+
+/// Pressed look: a soft veil over the shape while the finger is on it.
+fn veil(ui: &Ui, resp: &Response, rect: Rect, radius: f32, _color: Color32) {
+    let _ = elastic(ui, resp, rect, radius);
+}
+
+/// Called at the start of every frame: cards count themselves, so they arrive in order; a new `epoch` (another page)
+/// lets them arrive again.
+pub fn begin_frame(ctx: &egui::Context, epoch: u64) {
+    ctx.data_mut(|d| {
+        d.insert_temp(egui::Id::new("card-order"), 0usize);
+        d.insert_temp(egui::Id::new("card-epoch"), epoch);
+    });
+}
+
+fn next_card(ctx: &egui::Context) -> (usize, u64) {
+    ctx.data_mut(|d| {
+        let n = *d.get_temp_mut_or_insert_with(egui::Id::new("card-order"), || 0usize);
+        d.insert_temp(egui::Id::new("card-order"), n + 1);
+        (n, d.get_temp::<u64>(egui::Id::new("card-epoch")).unwrap_or(0))
+    })
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -128,17 +269,20 @@ pub fn button_sized(ui: &mut Ui, kind: Kind, glyph: Option<&str>, text: &str, wi
     let (rect, resp) = ui.allocate_exact_size(vec2(w, height), Sense::click());
     let enabled = ui.is_enabled();
     let alpha = if enabled { 1.0 } else { 0.38 };
-    // Expressive: pressing morphs the pill into a rounded square and back
-    let press = ui.ctx().animate_bool_with_time(resp.id.with("morph"), resp.is_pointer_button_down_on(), 0.14);
-    let radius = egui::lerp(height / 2.0..=14.0, press);
-    let rect = rect.shrink2(vec2(press * 2.0, press * 1.0));
+    // Expressive: pressing morphs the pill into a rounded square and back, and the button leans toward the finger
+    let press = spring(ui.ctx(), resp.id.with("morph"), resp.is_pointer_button_down_on() as u8 as f32, 800.0, 0.6);
+    let radius = egui::lerp(height / 2.0..=14.0, press.clamp(0.0, 1.2));
+    let (off, s) = ui.ctx().data(|d| d.get_temp::<(Vec2, f32)>(resp.id.with("motion"))).unwrap_or((Vec2::ZERO, 1.0));
+    let full = rect;
+    let rect = Rect::from_center_size(rect.center() + off, rect.size() * s);
     if fill != Color32::TRANSPARENT {
         ui.painter().rect_filled(rect, radius, fill.gamma_multiply(alpha));
     }
     if stroke != Stroke::NONE {
         ui.painter().rect_stroke(rect, radius, stroke, StrokeKind::Inside);
     }
-    veil(ui, &resp, rect, radius, fg);
+    let m = elastic(ui, &resp, full, radius);
+    ui.ctx().data_mut(|d| d.insert_temp(resp.id.with("motion"), m));
     let mut x = rect.center().x - content / 2.0;
     if let Some(g) = glyph {
         icon_at(ui, Pos2::new(x + 10.0, rect.center().y), g, 20.0, fg.gamma_multiply(alpha), false);
@@ -165,6 +309,11 @@ pub fn icon_button_sized(ui: &mut Ui, glyph: &str, color: Color32, bg: Option<Co
 
 /// A flat card.
 pub fn card<R>(ui: &mut Ui, f: impl FnOnce(&mut Ui) -> R) -> R {
+    let (n, epoch) = next_card(ui.ctx());
+    arrive(ui, egui::Id::new(("card", epoch, n)), n, |ui| plain_card(ui, f))
+}
+
+fn plain_card<R>(ui: &mut Ui, f: impl FnOnce(&mut Ui) -> R) -> R {
     egui::Frame::new()
         .fill(pal().card)
         .corner_radius(r(24))
@@ -179,18 +328,30 @@ pub fn card<R>(ui: &mut Ui, f: impl FnOnce(&mut Ui) -> R) -> R {
 /// A card that is one big touch target. Its touch area lies under the card's own buttons: it is registered before
 /// them, with the card's size from the last frame.
 pub fn tap_card(ui: &mut Ui, id: egui::Id, f: impl FnOnce(&mut Ui)) -> Response {
+    let (n, epoch) = next_card(ui.ctx());
+    arrive(ui, egui::Id::new(("card", epoch, n)), n, |ui| tap_card_inner(ui, id, f))
+}
+
+fn tap_card_inner(ui: &mut Ui, id: egui::Id, f: impl FnOnce(&mut Ui)) -> Response {
     let last: Option<Rect> = ui.ctx().data(|d| d.get_temp(id));
     let resp = ui.interact(last.unwrap_or(Rect::NOTHING), id, Sense::click());
-    let out = egui::Frame::new().fill(pal().card).corner_radius(r(24)).inner_margin(egui::Margin::same(18)).show(ui, |ui| {
-        ui.set_width(ui.available_width());
-        f(ui)
+    // the card leans toward the finger and gives a little (its content with it), then springs back
+    let (off, s) = ui.ctx().data(|d| d.get_temp::<(Vec2, f32)>(resp.id.with("motion"))).unwrap_or((Vec2::ZERO, 1.0));
+    let center = last.map(|r| r.center()).unwrap_or_default();
+    let t = egui::emath::TSTransform::from_translation(off + center.to_vec2() * (1.0 - s)) * egui::emath::TSTransform::from_scaling(s);
+    let out = ui.with_visual_transform(t, |ui| {
+        egui::Frame::new().fill(pal().card).corner_radius(r(24)).inner_margin(egui::Margin::same(18)).show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            f(ui)
+        })
     });
-    let rect = out.response.rect;
+    let rect = out.inner.response.rect;
     ui.ctx().data_mut(|d| d.insert_temp(id, rect));
     if last != Some(rect) {
         ui.ctx().request_repaint();
     }
-    veil(ui, &resp, rect, 24.0, pal().text);
+    let m = elastic(ui, &resp, rect, 24.0);
+    ui.ctx().data_mut(|d| d.insert_temp(resp.id.with("motion"), m));
     resp
 }
 

@@ -1,5 +1,6 @@
 mod clip;
 mod tools;
+mod phone;
 mod update;
 use oxide_config::Action;
 use oxide_ipc::{call, Request, Response};
@@ -171,6 +172,7 @@ fn main() {
         Some("clip") => clip::run(&a[1..]),
         Some("theme") => theme_cmd(&a[1..]),
         Some("update") => update::cmd(&a[1..]),
+        Some("phone") => phone::cmd(&a[1..]),
         _ => {}
     }
     let req = match a.iter().map(String::as_str).collect::<Vec<_>>().as_slice() {

@@ -557,6 +557,7 @@ impl eframe::App for App {
                 ctx.request_repaint();
             }
             ui.set_opacity(t);
+            begin_page(ui.ctx());
             egui::ScrollArea::vertical().id_salt(format!("page-{:?}", self.page)).auto_shrink([false, false]).show(ui, |ui| {
                 let width = ui.available_width().min(820.0);
                 let side = ((ui.available_width() - width) / 2.0).max(24.0);

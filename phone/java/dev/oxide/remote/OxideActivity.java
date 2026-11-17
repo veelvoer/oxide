@@ -99,6 +99,21 @@ public class OxideActivity extends NativeActivity {
         return n == null ? "" : n;
     }
 
+    /** May this app switch wireless debugging on? (granted once from the PC: oxide-ctl phone setup) */
+    public boolean canShowOnPc() {
+        return checkSelfPermission("android.permission.WRITE_SECURE_SETTINGS") == android.content.pm.PackageManager.PERMISSION_GRANTED;
+    }
+
+    /** Wireless debugging on or off: with it on, the PC can show this phone's screen (scrcpy) over Wi-Fi. */
+    public boolean setShowOnPc(boolean on) {
+        try {
+            Settings.Global.putInt(getContentResolver(), "adb_wifi_enabled", on ? 1 : 0);
+            return true;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
     public boolean isDark() {
         return (getResources().getConfiguration().uiMode & Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES;
     }

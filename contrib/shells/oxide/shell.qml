@@ -78,6 +78,12 @@ ShellRoot {
     AIPanel { id: aiPanel; ai: ai; shown: root.aiShown; onDismissed: root.aiShown = false }
 
     // `quickshell ipc call shell toggleControl` etc.
+    // key binds arrive straight from the compositor: no process has to start first
+    Connections {
+        target: OxideState
+        function onCall(name) { if (typeof root[name] === "function") root[name](); }
+    }
+
     IpcHandler {
         target: "shell"
         function toggleControl(): void { root.toggleControl(); }

@@ -40,6 +40,10 @@ Singleton {
     }
     function workspace(n) { dispatch({ "type": "workspace", "arg": n }); }
 
+    // the compositor asks the shell to open a panel (a key bind): the shell runs the function of that name
+    signal call(string name)
+    property bool plain: false
+
     Socket {
         id: sock
         path: Quickshell.env("OXIDE_SOCKET") || (Quickshell.env("XDG_RUNTIME_DIR") + "/oxide.sock")
@@ -47,7 +51,10 @@ Singleton {
         onConnectedChanged: {
             root.connected = connected;
             if (connected) {
-                write("{\"cmd\":\"subscribe\"}\n");
+                // as the shell: key binds then reach us directly (see `call`); an older Oxide does not know that, and
+                // the plain subscription follows its error
+                root.plain = false;
+                write("{\"cmd\":\"subscribe_shell\"}\n");
                 flush();
             }
         }
@@ -55,6 +62,8 @@ Singleton {
             onRead: line => {
                 try {
                     const msg = JSON.parse(line);
+                    if (msg.status === "call") { root.call(msg.call); return; }
+                    if (msg.status === "error" && !root.plain) { root.plain = true; sock.write("{\"cmd\":\"subscribe\"}\n"); sock.flush(); return; }
                     if (msg.status !== "state") return;
                     const s = msg.state;
                     root.active = s.active_workspace;

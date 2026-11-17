@@ -9,6 +9,7 @@ import QtQuick
 
 Pop {
     id: root
+    warm: true
     closeOnLeave: true
     required property var shell
     contentWidth: 384
@@ -66,13 +67,13 @@ Pop {
                     // switchable tiles: a click on the tile opens its list, the switch turns it on or off
                     property bool switchable: false
                     property bool open: false
+                    property int order: 0
                     signal clicked()
                     signal toggled()
                     width: (body.width - 8) / 2
                     height: Theme.expressive ? 72 : 84
                     // Expressive: an on tile fills with the container color and turns squarer; pressing squishes it
                     radius: !Theme.expressive ? Theme.rBox : (tm.pressed || dm.pressed) ? 14 : tile.on ? 20 : 32
-                    scale: Theme.expressive && (tm.pressed || dm.pressed) ? 0.96 : 1
                     color: Theme.expressive ? (tile.on ? (tm.containsMouse ? Qt.tint(Theme.container, Theme.alpha(Theme.onContainer, 0.08)) : Theme.container)
                                                        : (tm.containsMouse ? Theme.surfaceHighest : Theme.surfaceHigh))
                          : (tm.containsMouse ? Theme.line : Theme.raised)
@@ -81,7 +82,6 @@ Pop {
                     Behavior on color { ColorAnimation { duration: Theme.normal } }
                     Behavior on border.color { ColorAnimation { duration: Theme.fast } }
                     Behavior on radius { NumberAnimation { duration: Theme.spatial; easing.type: Easing.OutBack; easing.overshoot: 1.4 } }
-                    Behavior on scale { NumberAnimation { duration: Theme.normal; easing.type: Easing.OutBack; easing.overshoot: 2.0 } }
                     MouseArea { id: tm; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor; onClicked: tile.clicked() }
                     // the round icon is the switch (on = accent); the rest of the tile opens its list
                     Rectangle {
@@ -114,9 +114,12 @@ Pop {
                         Txt { width: parent.width; elide: Text.ElideRight; text: tile.title; color: Theme.expressive && tile.on ? Theme.onContainer : Theme.text; font { pixelSize: 14; weight: Font.DemiBold } }
                         Txt { width: parent.width; elide: Text.ElideRight; text: tile.sub; color: Theme.expressive && tile.on ? Theme.alpha(Theme.onContainer, 0.75) : Theme.muted; font.pixelSize: 12 }
                     }
+                    Arrive { when: root.shown; order: tile.order }
+                    Elastic { radius: tile.radius }
                 }
 
                 Tile {
+                    order: 0
                     icon: Networking.wifiEnabled ? "wifi" : "wifi-off"
                     title: "Wi-Fi"
                     sub: !Networking.wifiEnabled ? "Off" : (root.wifiNet ? root.wifiNet.name : "Not connected")
@@ -127,6 +130,7 @@ Pop {
                     onToggled: Networking.wifiEnabled = !Networking.wifiEnabled
                 }
                 Tile {
+                    order: 1
                     visible: !!root.adapter
                     icon: root.adapter && root.adapter.enabled ? "bluetooth" : "bluetooth-off"
                     title: "Bluetooth"
@@ -138,6 +142,7 @@ Pop {
                     onToggled: if (root.adapter) root.adapter.enabled = !root.adapter.enabled
                 }
                 Tile {
+                    order: 2
                     icon: root.shell.dnd ? "bell-off-outline" : "bell-outline"
                     title: "Do not disturb"
                     sub: root.shell.dnd ? "On" : "Off"
@@ -145,6 +150,7 @@ Pop {
                     onClicked: root.shell.dnd = !root.shell.dnd
                 }
                 Tile {
+                    order: 3
                     icon: "cog-outline"
                     title: "Settings"
                     sub: "Oxide"
@@ -234,6 +240,7 @@ Pop {
 
             // ---- sliders ----
             PillSlider {
+                Arrive { when: root.shown; order: 4 }
                 width: parent.width
                 icon: root.sink && root.sink.audio && (root.sink.audio.muted || root.sink.audio.volume <= 0) ? "volume-off" : "volume-high"
                 value: root.sink && root.sink.audio ? root.sink.audio.volume : 0
@@ -242,6 +249,7 @@ Pop {
                 onIconClicked: if (root.sink && root.sink.audio) root.sink.audio.muted = !root.sink.audio.muted
             }
             PillSlider {
+                Arrive { when: root.shown; order: 5 }
                 width: parent.width
                 icon: "brightness-6"
                 value: root.brightness
@@ -321,15 +329,14 @@ Pop {
                     property string label: ""
                     property var cmd: []
                     property bool armed: root.confirm === label
+                    property int order: 6
                     width: (body.width - 24) / 4
                     height: 52
                     radius: Theme.expressive ? (pm.pressed ? 12 : height / 2) : Theme.rBox
-                    scale: Theme.expressive && pm.pressed ? 0.94 : 1
                     color: armed ? Theme.bad : Theme.expressive ? (pm.containsMouse ? Theme.surfaceHighest : Theme.surfaceHigh)
                                                             : (pm.containsMouse ? Theme.raised : Theme.alpha(Theme.text, 0.06))
                     Behavior on color { ColorAnimation { duration: Theme.fast } }
                     Behavior on radius { NumberAnimation { duration: Theme.normal; easing.type: Easing.OutBack; easing.overshoot: 1.6 } }
-                    Behavior on scale { NumberAnimation { duration: Theme.normal; easing.type: Easing.OutBack; easing.overshoot: 2.0 } }
                     Column {
                         anchors.centerIn: parent
                         spacing: 2
@@ -347,11 +354,13 @@ Pop {
                             else { root.confirm = pb.label; disarm.restart(); }
                         }
                     }
+                    Arrive { when: root.shown; order: pb.order }
+                    Elastic { radius: pb.radius }
                 }
-                PowerBtn { icon: "lock-outline"; label: "Lock"; cmd: ["sh", "-c", "command -v hyprlock >/dev/null && hyprlock || loginctl lock-session"] }
-                PowerBtn { icon: "logout"; label: "Log out"; cmd: ["oxide-ctl", "quit"] }
-                PowerBtn { icon: "restart"; label: "Restart"; cmd: ["systemctl", "reboot"] }
-                PowerBtn { icon: "power"; label: "Shut down"; cmd: ["systemctl", "poweroff"] }
+                PowerBtn { order: 6; icon: "lock-outline"; label: "Lock"; cmd: ["sh", "-c", "command -v hyprlock >/dev/null && hyprlock || loginctl lock-session"] }
+                PowerBtn { order: 7; icon: "logout"; label: "Log out"; cmd: ["oxide-ctl", "quit"] }
+                PowerBtn { order: 8; icon: "restart"; label: "Restart"; cmd: ["systemctl", "reboot"] }
+                PowerBtn { order: 9; icon: "power"; label: "Shut down"; cmd: ["systemctl", "poweroff"] }
             }
         }
     }

@@ -57,6 +57,14 @@ mod imp {
         call(|env, a| env.call_method(a, "isDark", "()Z", &[])?.z())
     }
 
+    pub fn can_show_on_pc() -> bool {
+        call(|env, a| env.call_method(a, "canShowOnPc", "()Z", &[])?.z()).unwrap_or(false)
+    }
+
+    pub fn set_show_on_pc(on: bool) -> bool {
+        call(|env, a| env.call_method(a, "setShowOnPc", "(Z)Z", &[JValue::Bool(on as u8)])?.z()).unwrap_or(false)
+    }
+
     pub fn device_name() -> Option<String> {
         call(|env, a| {
             let o = env.call_method(a, "deviceName", "()Ljava/lang/String;", &[])?.l()?;
@@ -153,6 +161,12 @@ mod imp {
     }
     pub fn device_name() -> Option<String> {
         None
+    }
+    pub fn can_show_on_pc() -> bool {
+        false
+    }
+    pub fn set_show_on_pc(_: bool) -> bool {
+        false
     }
     pub fn dark() -> Option<bool> {
         std::env::var("OXIDE_REMOTE_LIGHT").ok().map(|_| false).or(Some(true))
