@@ -15,6 +15,7 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 jpeg-encoder = { version = "0.6", features = ["simd"] }
 sysinfo = { version = "0.40", default-features = false, features = ["system", "disk", "network", "component"] }
+qrcode = { version = "0.14", default-features = false }
 arboard = { version = "3", default-features = false }
 eframe = { version = "0.37", default-features = false, features = ["glow", "default_fonts"] }
 

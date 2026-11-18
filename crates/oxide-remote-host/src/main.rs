@@ -3,11 +3,13 @@
 //!
 //!   oxide-remote-host              open the window
 //!   oxide-remote-host --minimized  start minimized (that is what "start with Windows" uses)
+mod phonescreen;
 mod platform;
 mod reach;
 mod server;
 mod stats;
 mod store;
+mod update;
 
 use std::{
     sync::{Arc, Mutex},
@@ -25,6 +27,27 @@ struct App {
     autostart: bool,
     message: Option<(String, Instant)>,
     listening: Arc<Mutex<Option<String>>>,
+    upd: Arc<Mutex<update::Update>>,
+    phone_status: phonescreen::Status,
+    phone_child: Arc<Mutex<Option<std::process::Child>>>,
+    pin: String,
+    wifi_qr: Option<(String, Instant)>,
+}
+
+/// A QR code drawn as squares, dark on white.
+fn qr(ui: &mut egui::Ui, text: &str, size: f32) {
+    let Ok(code) = qrcode::QrCode::new(text.as_bytes()) else { return };
+    let n = code.width();
+    let cell = (size / (n + 4) as f32).floor().max(1.0);
+    let total = cell * (n + 4) as f32;
+    let (rect, _) = ui.allocate_exact_size(egui::vec2(total, total), egui::Sense::hover());
+    ui.painter().rect_filled(rect, 10.0, Color32::WHITE);
+    for (i, c) in code.to_colors().iter().enumerate() {
+        if *c == qrcode::Color::Dark {
+            let (x, y) = (i % n, i / n);
+            ui.painter().rect_filled(egui::Rect::from_min_size(rect.min + egui::vec2((x + 2) as f32 * cell, (y + 2) as f32 * cell), egui::vec2(cell, cell)), 0.0, Color32::BLACK);
+        }
+    }
 }
 
 fn setup_style(ctx: &egui::Context) {
@@ -107,6 +130,24 @@ impl eframe::App for App {
                     });
                 });
 
+                // an update, when there is one
+                let u = self.upd.lock().map(|u| u.clone()).unwrap_or_default();
+                if let Some(v) = &u.latest {
+                    card(ui, |ui| {
+                        ui.horizontal(|ui| {
+                            ui.vertical(|ui| {
+                                ui.label(RichText::new(format!("Version {v} is available")).strong());
+                                ui.label(RichText::new(if u.busy.is_empty() { format!("You have {}", update::VERSION) } else { u.busy.clone() }).size(12.5).color(Color32::GRAY));
+                            });
+                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                if ui.add(egui::Button::new(RichText::new("Update").color(Color32::from_rgb(0x0e, 0x1a, 0x3a)).strong()).fill(ACCENT)).clicked() {
+                                    update::apply(self.upd.clone(), v.clone());
+                                }
+                            });
+                        });
+                    });
+                }
+
                 heading(ui, "Pair a phone");
                 card(ui, |ui| match &code {
                     Some((c, until)) => {
@@ -160,6 +201,49 @@ impl eframe::App for App {
                             s.phones.retain(|p| p.id != id);
                             s.save();
                         }
+                    }
+                });
+
+                heading(ui, "Your phone's screen on this PC");
+                card(ui, |ui| {
+                    ui.label("See and use your phone in a window here, with very little delay, also while the phone stays in your pocket (its own screen stays dark).");
+                    let status = self.phone_status.lock().map(|s| s.clone()).unwrap_or_default();
+                    if !phonescreen::ready() {
+                        if ui.button("Get the tools (scrcpy, about 40 MB)").clicked() {
+                            phonescreen::install_tools(self.phone_status.clone());
+                        }
+                    } else {
+                        ui.horizontal_wrapped(|ui| {
+                            if ui.add(egui::Button::new(RichText::new("Show / hide my phone").color(Color32::from_rgb(0x0e, 0x1a, 0x3a)).strong()).fill(ACCENT)).clicked() {
+                                phonescreen::show(self.phone_status.clone(), self.phone_child.clone());
+                            }
+                            if ui.button("Set up (phone on USB, once)").clicked() {
+                                phonescreen::setup(self.phone_status.clone());
+                            }
+                            if ui.button("Pair over Wi-Fi").clicked() {
+                                let (name, pw) = (format!("oxide-{}", phonescreen::random_word(6)), phonescreen::random_word(10));
+                                self.wifi_qr = Some((format!("WIFI:T:ADB;S:{name};P:{pw};;"), Instant::now()));
+                                phonescreen::pair(self.phone_status.clone(), name, pw);
+                            }
+                        });
+                        ui.horizontal(|ui| {
+                            ui.add(egui::TextEdit::singleline(&mut self.pin).password(true).hint_text("Phone PIN").desired_width(150.0));
+                            if ui.button("Unlock the phone").clicked() && !self.pin.is_empty() {
+                                phonescreen::unlock(self.phone_status.clone(), std::mem::take(&mut self.pin));
+                            }
+                        });
+                        ui.label(RichText::new("Android hides its PIN pad from screen mirrors, so the PIN is typed here. It is never stored.").size(12.0).color(Color32::GRAY));
+                        if let Some((text, at)) = &self.wifi_qr {
+                            if at.elapsed() < Duration::from_secs(125) {
+                                ui.horizontal(|ui| {
+                                    qr(ui, text, 170.0);
+                                    ui.label("On the phone: Settings › Developer options › Wireless debugging › Pair device with QR code, then scan this.");
+                                });
+                            }
+                        }
+                    }
+                    if !status.is_empty() {
+                        ui.label(RichText::new(status).size(12.5).color(Color32::from_rgb(0xe8, 0xb4, 0x6a)));
                     }
                 });
 
@@ -297,7 +381,10 @@ fn main() -> eframe::Result {
             if start_minimized {
                 cc.egui_ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(true));
             }
-            Ok(Box::new(App { shared, name, autostart: platform::autostart(), message: None, listening }))
+            let upd: Arc<Mutex<update::Update>> = Default::default();
+            update::cleanup();
+            update::check(upd.clone());
+            Ok(Box::new(App { shared, name, autostart: platform::autostart(), message: None, listening, upd, phone_status: Default::default(), phone_child: Default::default(), pin: String::new(), wifi_qr: None }))
         }),
     )
 }

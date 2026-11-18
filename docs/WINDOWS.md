@@ -28,6 +28,19 @@ else on the PC.
 Not available on Windows: jumping to virtual desktop number N (only one by one), the exact volume slider, the media
 title, GPU load, Wake-on-LAN *for this PC* works if the BIOS and network card allow it (the app shows its address).
 
+## Your phone's screen on the PC
+
+The window has a *Your phone's screen on this PC* section: **Get the tools** downloads scrcpy (with adb) from its official
+release into the app's own folder, **Show / hide my phone** opens the phone in a window (its own screen stays dark, so it
+can stay in your pocket), **Unlock the phone** types the PIN you enter (Android hides its PIN pad from mirrors; the PIN is
+never stored). For Wi-Fi without a cable: connect the phone with USB once and press *Set up*, switch on *Show this phone on
+my PCs* in the Oxide Remote app, then *Pair over Wi-Fi* and scan the QR code (Developer options › Wireless debugging).
+
+## Updates
+
+The program checks GitHub for a newer `windows-v…` release and shows an **Update** button; one click downloads it,
+swaps it in and restarts. The Android app does the same from its settings (Updates).
+
 ## Latency
 
 Frames are JPEG, encoded on the CPU (about 4–6 ms for 1280 px on a recent PC), sent over an encrypted TCP stream
