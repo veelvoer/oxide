@@ -69,6 +69,8 @@ pub struct Win {
     pub size_deferred: bool,
     /// a floating window that chooses its own size: placed at that size after its first frame
     pub auto_float: bool,
+    /// where a tiled window being moved is drawn (it follows the pointer); its tile is kept
+    pub drag_geo: Option<Rectangle<i32, Logical>>,
     pub held: Option<std::time::Instant>,
     /// Opacity multiplier from the fade animation, 0..=1.
     pub fade: f32,
@@ -150,6 +152,8 @@ pub struct Drag {
     /// resize from the left / top edge (pointer started in that half)
     pub left: bool,
     pub top: bool,
+    /// the window was tiled when the drag began: it stays tiled (moved: swapped on release; resized: the split moves)
+    pub tiled: bool,
 }
 
 pub const MOD_LOGO: u8 = 1;
@@ -200,6 +204,8 @@ pub struct Oxide {
     pub group_pending: Vec<(String, u32, std::time::Instant)>,
     /// a button press that dismissed a group: its release is swallowed too
     pub group_swallow: Option<u32>,
+    /// split ratio and master factor when a tiled resize began (the drag is relative to them)
+    pub drag_ratio_start: Option<(f32, f32)>,
     /// dims the workspace behind a shown scratchpad group
     pub scrim: SolidColorBuffer,
     /// the zoom-out overview (Super+Tab), when open
@@ -364,6 +370,7 @@ impl Oxide {
             super_combo: false,
             group_pending: vec![],
             group_swallow: None,
+            drag_ratio_start: None,
             scrim: SolidColorBuffer::default(),
             overview: None,
             cpu_load: 0.0,

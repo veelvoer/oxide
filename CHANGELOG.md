@@ -2,6 +2,12 @@
 
 ## 0.2.0 (unreleased)
 
+* New: **Oxide Remote for Windows** (`oxide-remote-host`): the phone app's stream, control, stats and actions with a
+  Windows PC, DXGI capture and a newest-frame-only pipeline.
+* New: the phone app's **Remote tab**: a touchpad without a picture (acceleration, long-press drag, two-finger scroll,
+  three-finger swipes between workspaces), workspace strip, click buttons and quick actions.
+* Fixed: dragging and resizing windows has no delay (no animation while dragging), and tiled windows stay tiled:
+  Super+drag swaps, Super+right-drag moves the split (like Hyprland).
 * New: unlocking the phone from the PC (Super+Shift+P): Android hides its PIN pad from screen mirrors, so the PIN is asked
   on the PC and typed on the phone (never stored).
 * Expressive everywhere: Settings (cards, colored titles, filter chips, Material switch), clipboard, calendar, HUD,

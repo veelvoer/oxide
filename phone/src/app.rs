@@ -26,6 +26,8 @@ const SOURCE: &str = "https://github.com/veelvoer/oxide";
 #[derive(PartialEq, Clone, Copy)]
 enum Tab {
     Screen,
+    /// touchpad and quick actions, no picture
+    Remote,
     Stats,
     Control,
 }
@@ -83,6 +85,19 @@ struct Update {
     latest: Option<(String, String)>,
     checked: bool,
     error: Option<String>,
+}
+
+/// The touchpad's memory between frames.
+#[derive(Default, Clone)]
+struct PadState {
+    two: bool,
+    three: bool,
+    swipe: Vec2,
+    moved: f32,
+    holding: bool,
+    press_start: Option<f64>,
+    touch_time: f64,
+    dragging: bool,
 }
 
 /// Full-screen view: zoom and the toolbar.
@@ -419,14 +434,15 @@ impl App {
             Page::Pc(i) => self.pc(ui, i),
         });
         if nav && kb <= 0.0 {
-            let items = [(ic::MONITOR, "Screen"), (ic::CHART, "Stats"), (ic::SLIDERS, "Control")];
+            let items = [(ic::MONITOR, "Screen"), (ic::MOUSE, "Remote"), (ic::CHART, "Stats"), (ic::SLIDERS, "Control")];
             let sel = match self.tab {
                 Tab::Screen => 0,
-                Tab::Stats => 1,
-                Tab::Control => 2,
+                Tab::Remote => 1,
+                Tab::Stats => 2,
+                Tab::Control => 3,
             };
             if let Some(n) = ui::nav_bar(ui, &items, sel, bottom) {
-                self.tab = [Tab::Screen, Tab::Stats, Tab::Control][n];
+                self.tab = [Tab::Screen, Tab::Remote, Tab::Stats, Tab::Control][n];
             }
         }
         if self.page == Page::Home && !self.store.pcs.is_empty() {
@@ -1196,6 +1212,7 @@ impl App {
         }
         match self.tab {
             Tab::Screen => self.screen(ui),
+            Tab::Remote => self.remote(ui),
             Tab::Stats => self.stats(ui),
             Tab::Control => self.control(ui),
         }
@@ -1489,6 +1506,202 @@ impl App {
             self.exit_full();
         }
         ui.ctx().request_repaint_after(Duration::from_millis(500));
+    }
+
+    /// Remote mode: no picture, just a touchpad and the things you reach for most. The pad takes the whole middle of
+    /// the screen: one finger moves the pointer (with acceleration), a tap clicks, a long press holds the button for
+    /// dragging, two fingers scroll (a two-finger tap right-clicks), three fingers swipe between workspaces (up:
+    /// overview).
+    fn remote(&mut self, ui: &mut Ui) {
+        let p = pal();
+        let Some(l) = &self.live else { return };
+        let tx = l.session.to_pc.clone();
+        let cur = l.stats.as_ref().and_then(|s| s.workspace);
+        let act = |n: &str, a: Option<String>| ToPc::Action { name: n.into(), arg: a };
+        let disp = |j: &str| ToPc::Action { name: "dispatch".into(), arg: Some(j.into()) };
+        let mut sends: Vec<ToPc> = vec![];
+        // the workspace strip
+        ui.add_space(2.0);
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = 6.0;
+            if tap(&ui::icon_button_sized(ui, ic::LEFT_ARROW, p.text, Some(p.raised), 40.0, 18.0)) {
+                sends.push(disp("{\"type\":\"workspace_existing\",\"arg\":-1}"));
+            }
+            let w = ((ui.available_width() - 46.0 - 6.0 * 8.0) / 9.0).floor().max(24.0);
+            for n in 1..=9u32 {
+                let on = cur == Some(n);
+                let (rect, resp) = ui.allocate_exact_size(vec2(w, 40.0), Sense::click());
+                let fill = if on { p.accent } else { p.raised };
+                ui.painter().rect_filled(rect, if on { 20.0 } else { 12.0 }, fill);
+                ui.painter().text(rect.center(), Align2::CENTER_CENTER, n.to_string(), medium(14.0), if on { p.on_accent } else { p.text });
+                if tap(&resp) {
+                    sends.push(act("workspace", Some(n.to_string())));
+                }
+            }
+            if tap(&ui::icon_button_sized(ui, ic::RIGHT, p.text, Some(p.raised), 40.0, 18.0)) {
+                sends.push(disp("{\"type\":\"workspace_existing\",\"arg\":1}"));
+            }
+        });
+        ui.add_space(8.0);
+        // the pad: all the height that is left, minus the buttons and quick actions below it
+        let below = 52.0 + 8.0 + 8.0 + 3.0 * 56.0 + 36.0;
+        let pad_h = (ui.available_height() - below).max(160.0);
+        let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), pad_h), Sense::click_and_drag());
+        ui.painter().rect_filled(rect, 28.0, p.card);
+        ui.painter().rect_stroke(rect, 28.0, egui::Stroke::new(1.5, p.line), egui::StrokeKind::Inside);
+        ui.painter().text(rect.center(), Align2::CENTER_CENTER, "touchpad", medium(15.0), p.muted.gamma_multiply(0.5));
+        let id = resp.id;
+        let (multi, now) = ui.input(|i| (i.multi_touch(), i.time));
+        let mut state: PadState = ui.ctx().data(|d| d.get_temp(id)).unwrap_or_default();
+        if let Some(mt) = multi {
+            state.dragging = false;
+            if mt.num_touches >= 3 {
+                state.swipe += mt.translation_delta;
+                state.three = true;
+            } else {
+                // two fingers: scroll (natural, like a phone)
+                if mt.translation_delta.y.abs() > 0.2 {
+                    sends.push(ToPc::Scroll { dx: (-mt.translation_delta.x * 0.4) as f64, dy: (-mt.translation_delta.y * 0.7) as f64 });
+                }
+                state.two = true;
+            }
+            state.touch_time = now;
+        } else {
+            if state.three && state.swipe.length() > 60.0 {
+                // the swipe's main direction
+                let s = state.swipe;
+                if s.x.abs() > s.y.abs() {
+                    sends.push(disp(if s.x < 0.0 { "{\"type\":\"workspace_existing\",\"arg\":1}" } else { "{\"type\":\"workspace_existing\",\"arg\":-1}" }));
+                } else if s.y < 0.0 {
+                    sends.push(disp("{\"type\":\"toggle_overview\"}"));
+                }
+                platform::haptic(2);
+            }
+            if state.two && !state.three && state.moved < 12.0 && resp.clicked() {
+                sends.push(ToPc::Click { button: "right".into() });
+                platform::haptic(1);
+            }
+            if !ui.input(|i| i.pointer.any_down()) {
+                state.three = false;
+                state.two = false;
+                state.swipe = Vec2::ZERO;
+            }
+            if resp.dragged() && !state.three && !state.two {
+                let d = resp.drag_delta();
+                let speed = d.length();
+                // a little acceleration: slow moves are precise, fast ones cross the screen
+                let k = 1.5 * (1.0 + (speed * 0.06).min(1.6));
+                if d != Vec2::ZERO {
+                    sends.push(ToPc::PointerBy { dx: (d.x * k) as f64, dy: (d.y * k) as f64 });
+                }
+                state.moved += speed;
+            }
+            // a long press holds the button (drag a window, select text); letting go releases it
+            if resp.is_pointer_button_down_on() && !state.holding && state.moved < 6.0 && state.press_start.is_some_and(|t| now - t > 0.45) {
+                state.holding = true;
+                sends.push(ToPc::ButtonState { button: "left".into(), pressed: true });
+                platform::haptic(1);
+            }
+            if resp.drag_started() || (resp.is_pointer_button_down_on() && state.press_start.is_none()) {
+                state.press_start = Some(now);
+                state.moved = 0.0;
+            }
+            if !ui.input(|i| i.pointer.any_down()) {
+                if state.holding {
+                    sends.push(ToPc::ButtonState { button: "left".into(), pressed: false });
+                    state.holding = false;
+                }
+                state.press_start = None;
+            }
+            if resp.clicked() && !state.two && !state.holding && state.moved < 8.0 && now - state.touch_time > 0.15 {
+                sends.push(ToPc::Click { button: "left".into() });
+                platform::haptic(0);
+            }
+        }
+        if state.holding {
+            ui.painter().rect_stroke(rect, 28.0, egui::Stroke::new(3.0, p.accent), egui::StrokeKind::Inside);
+        }
+        ui.ctx().data_mut(|d| d.insert_temp(id, state));
+        ui.ctx().request_repaint_after(Duration::from_millis(100));
+        ui.add_space(8.0);
+        // the buttons
+        ui.horizontal(|ui| {
+            let w = (ui.available_width() - 8.0) / 2.0;
+            for (label, btn) in [("Left click", "left"), ("Right click", "right")] {
+                let (rect, resp) = ui.allocate_exact_size(vec2(w, 52.0), Sense::click());
+                ui.painter().rect_filled(rect, 26.0, p.container);
+                if resp.is_pointer_button_down_on() {
+                    ui.painter().rect_filled(rect, 26.0, p.on_container.gamma_multiply(0.12));
+                }
+                ui.painter().text(rect.center(), Align2::CENTER_CENTER, label, medium(15.0), p.on_container);
+                if resp.drag_started() {
+                    sends.push(ToPc::ButtonState { button: btn.into(), pressed: true });
+                    platform::haptic(0);
+                }
+                if resp.drag_stopped() || (resp.clicked() && !resp.dragged()) {
+                    sends.push(ToPc::ButtonState { button: btn.into(), pressed: false });
+                }
+            }
+        });
+        ui.add_space(8.0);
+        // quick actions, three rows of icons you can scroll sideways
+        let quick: [(&str, &str, u8, &str, &str); 18] = [
+            (ic::GRID, "Overview", 0, "{\"type\":\"toggle_overview\"}", ""),
+            (ic::SEARCH, "Apps", 1, "SUPER+r", ""),
+            (ic::KEYBOARD, "Terminal", 1, "SUPER+q", ""),
+            (ic::CLOSE, "Close", 0, "{\"type\":\"close\"}", ""),
+            (ic::WINDOW, "Float", 0, "{\"type\":\"toggle_floating\"}", ""),
+            (ic::EXPAND, "Fullscreen", 0, "{\"type\":\"toggle_fullscreen\"}", ""),
+            (ic::TABS, "Alt+Tab", 1, "ALT+Tab", ""),
+            (ic::COMMAND, "Super", 1, "Super_L", ""),
+            (ic::LEFT_ARROW, "Esc", 1, "Escape", ""),
+            (ic::ENTER, "Enter", 1, "Return", ""),
+            (ic::MUTE, "Mute", 2, "mute", ""),
+            (ic::SPEAKER, "Vol +", 2, "volume_up", ""),
+            (ic::MUTE, "Vol -", 2, "volume_down", ""),
+            (ic::PLAY, "Play", 2, "media_play_pause", ""),
+            (ic::NEXT, "Next", 2, "media_next", ""),
+            (ic::PREV, "Previous", 2, "media_prev", ""),
+            (ic::LOCK, "Lock", 2, "lock", ""),
+            (ic::SEND, "Screenshot", 2, "screenshot", ""),
+        ];
+        egui::ScrollArea::horizontal().id_salt("quick").auto_shrink([false, true]).show(ui, |ui| {
+            let cols = (quick.len() + 2) / 3;
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing = vec2(8.0, 8.0);
+                for c in 0..cols {
+                    ui.vertical(|ui| {
+                        ui.spacing_mut().item_spacing.y = 8.0;
+                        for r in 0..3 {
+                            let Some((glyph, label, kind, arg, _)) = quick.get(c * 3 + r) else { continue };
+                            let (rect, resp) = ui.allocate_exact_size(vec2(96.0, 48.0), Sense::click());
+                            ui.painter().rect_filled(rect, 24.0, p.raised);
+                            if resp.is_pointer_button_down_on() {
+                                ui.painter().rect_filled(rect, 24.0, p.text.gamma_multiply(0.1));
+                            }
+                            ui::icon_at(ui, Pos2::new(rect.left() + 22.0, rect.center().y), glyph, 18.0, p.text, false);
+                            ui.painter().text(Pos2::new(rect.left() + 40.0, rect.center().y), Align2::LEFT_CENTER, *label, medium(12.5), p.text);
+                            if tap(&resp) {
+                                match kind {
+                                    0 => sends.push(disp(arg)),
+                                    1 => {
+                                        let (mods, key) = match arg.rsplit_once('+') {
+                                            Some((m, k)) => (m.split('+').map(|x| x.to_lowercase()).collect::<Vec<_>>(), k.to_string()),
+                                            None => (vec![], arg.to_string()),
+                                        };
+                                        sends.push(ToPc::Key { name: key, mods });
+                                    }
+                                    _ => sends.push(act(arg, None)),
+                                }
+                            }
+                        }
+                    });
+                }
+            });
+        });
+        for m in sends {
+            let _ = tx.send(m);
+        }
     }
 
     fn stats(&mut self, ui: &mut Ui) {

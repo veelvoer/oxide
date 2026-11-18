@@ -1,0 +1,41 @@
+[package]
+name = "oxide-remote-host"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Oxide Remote for Windows (and anything else without Oxide): lets the Oxide Remote phone app see and control this PC with very little delay."
+
+[[bin]]
+name = "oxide-remote-host"
+path = "src/main.rs"
+
+[dependencies]
+oxide-remote-proto = { path = "../oxide-remote-proto" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+jpeg-encoder = { version = "0.6", features = ["simd"] }
+sysinfo = { version = "0.40", default-features = false, features = ["system", "disk", "network", "component"] }
+arboard = { version = "3", default-features = false }
+eframe = { version = "0.37", default-features = false, features = ["glow", "default_fonts"] }
+
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.62", features = [
+    "Win32_Foundation",
+    "Win32_Graphics_Direct3D",
+    "Win32_Graphics_Direct3D11",
+    "Win32_Graphics_Dxgi",
+    "Win32_Graphics_Dxgi_Common",
+    "Win32_Graphics_Gdi",
+] }
+windows-sys = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_UI_Input_KeyboardAndMouse",
+    "Win32_UI_WindowsAndMessaging",
+    "Win32_System_Power",
+    "Win32_System_Shutdown",
+    "Win32_System_Registry",
+    "Win32_Graphics_Gdi",
+] }
+
+[target.'cfg(not(windows))'.dependencies]
+eframe = { version = "0.37", default-features = false, features = ["glow", "default_fonts", "wayland", "x11"] }

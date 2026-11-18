@@ -240,12 +240,10 @@ impl Oxide {
         if self.wins[i].fullscreen {
             return false;
         }
-        if !self.wins[i].floating {
-            self.wins[i].floating = true;
-            self.wins[i].float_geo = Some(self.wins[i].rect);
-            self.arrange();
-        }
-        let geo = self.wins[i].float_geo.unwrap_or(self.wins[i].rect);
+        // like Hyprland: a tiled window stays tiled (Super+drag swaps it with the one you drop it on, Super+right-drag
+        // moves the split); only floating windows move and resize freely
+        let tiled = !self.wins[i].floating;
+        let geo = if tiled { self.wins[i].rect } else { self.wins[i].float_geo.unwrap_or(self.wins[i].rect) };
         self.focus_window(Some(window.clone()));
         self.drag = Some(crate::state::Drag {
             window,
@@ -255,8 +253,28 @@ impl Oxide {
             start_geo: geo,
             left: pos.x < (geo.loc.x + geo.size.w / 2) as f64,
             top: pos.y < (geo.loc.y + geo.size.h / 2) as f64,
+            tiled,
         });
         true
+    }
+
+    /// The button came up: a moved tiled window is swapped with the tiled window under the pointer (or goes back).
+    fn end_drag(&mut self) {
+        let Some(d) = self.drag.take() else { return };
+        self.drag_ratio_start = None;
+        let Some(i) = self.win_idx(&d.window) else { return };
+        self.wins[i].drag_geo = None;
+        if d.tiled && !d.resize {
+            let pos = self.pointer.current_location();
+            let ws = self.wins[i].ws;
+            let target = (0..self.wins.len()).find(|&j| {
+                j != i && self.wins[j].ws == ws && self.wins[j].visible && !self.wins[j].floating && !self.wins[j].fullscreen && self.wins[j].rect.to_f64().contains(pos)
+            });
+            if let Some(j) = target {
+                self.wins.swap(i, j);
+            }
+        }
+        self.arrange();
     }
 
     fn update_drag(&mut self, pos: Point<f64, Logical>) {
@@ -264,16 +282,38 @@ impl Oxide {
         let (dx, dy) = ((pos.x - d.start_ptr.x).round() as i32, (pos.y - d.start_ptr.y).round() as i32);
         let g = d.start_geo;
         let min = 120;
-        let new = if d.resize {
+        let window = d.window.clone();
+        let (tiled, resize) = (d.tiled, d.resize);
+        if tiled && resize {
+            // the split moves: growing toward the screen's middle or away from it, by how far the pointer went
+            let Some(i) = self.win_idx(&window) else { return };
+            let ws = self.wins[i].ws;
+            let Some(mi) = self.monitors.iter().position(|m| m.ws == ws) else { return };
+            let Some(og) = self.space.output_geometry(&self.monitors[mi].output) else { return };
+            let in_left_half = (g.loc.x + g.size.w / 2) < og.loc.x + og.size.w / 2;
+            let grow = if in_left_half { dx } else { -dx } as f32 / og.size.w.max(1) as f32;
+            let start = self.drag_ratio_start.get_or_insert((self.config.layout.split_ratio, self.config.layout.master_factor));
+            let (s0, m0) = *start;
+            self.config.layout.split_ratio = (s0 + grow).clamp(0.1, 0.9);
+            self.config.layout.master_factor = (m0 + grow).clamp(0.1, 0.9);
+            self.arrange();
+            return;
+        }
+        let new = if resize {
             let (x, w) = if d.left { (g.loc.x + dx.min(g.size.w - min), (g.size.w - dx).max(min)) } else { (g.loc.x, (g.size.w + dx).max(min)) };
             let (y, h) = if d.top { (g.loc.y + dy.min(g.size.h - min), (g.size.h - dy).max(min)) } else { (g.loc.y, (g.size.h + dy).max(min)) };
             smithay::utils::Rectangle::new((x, y).into(), (w, h).into())
         } else {
             smithay::utils::Rectangle::new((g.loc.x + dx, g.loc.y + dy).into(), g.size)
         };
-        let window = d.window.clone();
         if let Some(i) = self.win_idx(&window) {
-            self.wins[i].float_geo = Some(new);
+            if tiled {
+                // follows the pointer, its tile stays where it is until the drop
+                self.wins[i].drag_geo = Some(new);
+                self.space.raise_element(&window, false);
+            } else {
+                self.wins[i].float_geo = Some(new);
+            }
             self.arrange();
         }
     }
@@ -295,7 +335,7 @@ impl Oxide {
         // interactive move/resize
         if let Some(d) = &self.drag {
             if state == ButtonState::Released && d.button == code {
-                self.drag = None;
+                self.end_drag();
             }
             return;
         }

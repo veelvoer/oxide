@@ -58,6 +58,7 @@ Pick **Oxide** in your login manager, or run `oxide-session` from a TTY. Full in
 | [Overview, scratchpads, HUD](docs/WORKFLOW.md) | `Super+Tab`, groups of apps, zero-bar mode, smart tiling, telemetry borders, config errors |
 | [Phone app](docs/PHONE.md) | Pair your phone, see and control the PC, Wake-on-LAN |
 | [Updates](docs/UPDATES.md) | Automatic updates and what they do |
+| [Oxide Remote for Windows](docs/WINDOWS.md) | The phone app with a Windows PC (no Oxide needed) |
 | [Theming](docs/THEMING.md) | Palettes, light/dark, wallpapers, the theme that follows your wallpaper |
 | [Configuration reference](docs/CONFIG.md) | Every key of `oxide.toml` |
 | [Own shells](docs/SHELLS.md) | Use your own Quickshell config, theme tokens, integration points |

@@ -56,6 +56,17 @@ pub fn action(name: &str, arg: Option<&str>) -> Result<(), String> {
             let n: u32 = arg.and_then(|a| a.parse().ok()).ok_or("workspace needs a number")?;
             oxide(Request::Dispatch { action: oxide_config::Action::Workspace(n) })
         }
+        // any compositor action, as JSON: {"type":"toggle_floating"}, {"type":"workspace_existing","arg":1}, …
+        "dispatch" => {
+            let j = arg.ok_or("no action")?;
+            let action: oxide_config::Action = serde_json::from_str(j).map_err(|e| format!("bad action: {e}"))?;
+            oxide(Request::Dispatch { action })
+        }
+        "volume_up" => run("wpctl", &["set-volume", "-l", "1.5", "@DEFAULT_AUDIO_SINK@", "5%+"]).or_else(|_| run("pactl", &["set-sink-volume", "@DEFAULT_SINK@", "+5%"])),
+        "volume_down" => run("wpctl", &["set-volume", "@DEFAULT_AUDIO_SINK@", "5%-"]).or_else(|_| run("pactl", &["set-sink-volume", "@DEFAULT_SINK@", "-5%"])),
+        "brightness_up" => run("brightnessctl", &["set", "+10%"]),
+        "brightness_down" => run("brightnessctl", &["set", "10%-"]),
+        "screenshot" => spawn("sh", &["-c", "grim - | wl-copy -t image/png"]),
         "run" => {
             let c = arg.filter(|a| !a.trim().is_empty()).ok_or("nothing to run")?;
             oxide(Request::Dispatch { action: oxide_config::Action::Exec(c.to_string()) }).or_else(|_| spawn("sh", &["-c", c]))

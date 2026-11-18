@@ -193,6 +193,7 @@ impl Oxide {
             open: None,
             size_deferred: false,
             auto_float: false,
+            drag_geo: None,
             held: None,
             fade: 1.0,
             fade_anim: None,
@@ -458,6 +459,9 @@ impl Oxide {
 
     fn place(&mut self, i: usize, outer: Rectangle<i32, Logical>, border: i32, tiled: bool) {
         let now: Duration = self.clock.now().into();
+        // while a window is dragged nothing animates: everything stays exactly under the pointer
+        let dragging = self.drag.is_some();
+        let outer = self.wins[i].drag_geo.unwrap_or(outer);
         let anims = &self.config.animations;
         let win = &mut self.wins[i];
         let previous = win.rect;
@@ -476,7 +480,7 @@ impl Oxide {
             } else {
                 win.fade = 1.0;
             }
-        } else if !(anims.enabled && anims.windows.enabled) {
+        } else if dragging || win.drag_geo.is_some() || !(anims.enabled && anims.windows.enabled) {
             win.base = target;
             win.mv = None;
         } else if previous != outer {
