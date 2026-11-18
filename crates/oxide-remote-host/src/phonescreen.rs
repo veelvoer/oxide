@@ -127,12 +127,15 @@ fn find() -> Option<String> {
     if let Some(s) = d.iter().find(|s| !s.contains("._adb")).or(d.first()) {
         return Some(s.clone());
     }
-    connect_mdns();
-    if devices().is_empty() {
-        std::thread::sleep(Duration::from_millis(1500));
+    // the phone announces itself a moment after wireless debugging is on: ask for up to ~10 s
+    for _ in 0..8 {
         connect_mdns();
+        if let Some(s) = devices().into_iter().next() {
+            return Some(s);
+        }
+        std::thread::sleep(Duration::from_millis(1300));
     }
-    devices().into_iter().next()
+    None
 }
 
 /// Open the phone's screen. The phone's own display goes dark (it can stay in your pocket); a locked phone shows its
@@ -140,13 +143,22 @@ fn find() -> Option<String> {
 pub fn show(status: Status, child: Arc<Mutex<Option<Child>>>) {
     std::thread::spawn(move || {
         let say = |t: &str| *status.lock().unwrap() = t.to_string();
-        if let Some(c) = child.lock().unwrap().as_mut() {
-            if c.try_wait().ok().flatten().is_none() {
-                let _ = c.kill();
-                *child.lock().unwrap() = None;
-                say("Closed.");
-                return;
+        let running = {
+            let mut g = child.lock().unwrap();
+            let alive = g.as_mut().is_some_and(|c| c.try_wait().ok().flatten().is_none());
+            if alive {
+                if let Some(c) = g.as_mut() {
+                    let _ = c.kill();
+                }
             }
+            if alive || g.is_some() {
+                *g = None;
+            }
+            alive
+        };
+        if running {
+            say("Closed.");
+            return;
         }
         let (Some(scrcpy), true) = (tool("scrcpy"), tool("adb").is_some()) else {
             say("Get the tools first (button above).");
@@ -163,10 +175,28 @@ pub fn show(status: Status, child: Arc<Mutex<Option<Child>>>) {
             args.push("--video-codec-options=profile:int=1,level:int=4096".into());
             args.push("--keyboard=uhid".into());
         }
-        match cmd(&scrcpy).args(&args).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).spawn() {
-            Ok(c) => {
-                *child.lock().unwrap() = Some(c);
-                say("Showing the phone. Press the button again to close it.");
+        let log = tools_dir().join("scrcpy.log");
+        let _ = std::fs::create_dir_all(tools_dir());
+        let errf = std::fs::File::create(&log).map(Stdio::from).unwrap_or_else(|_| Stdio::null());
+        let mut c = cmd(&scrcpy);
+        c.args(&args).stdin(Stdio::null()).stdout(Stdio::null()).stderr(errf);
+        // scrcpy must talk to the same adb that found the phone (two adb versions fight over the server)
+        if let Some(a) = tool("adb") {
+            c.env("ADB", a);
+        }
+        match c.spawn() {
+            Ok(ch) => {
+                *child.lock().unwrap() = Some(ch);
+                std::thread::sleep(Duration::from_millis(3500));
+                let exited = child.lock().unwrap().as_mut().is_some_and(|c| c.try_wait().ok().flatten().is_some());
+                if exited {
+                    *child.lock().unwrap() = None;
+                    let text = std::fs::read_to_string(&log).unwrap_or_default();
+                    let tail: Vec<&str> = text.lines().rev().filter(|l| !l.trim().is_empty()).take(3).collect();
+                    say(&format!("scrcpy stopped: {}", tail.into_iter().rev().collect::<Vec<_>>().join(" | ")));
+                } else {
+                    say("Showing the phone. Press the button again to close it.");
+                }
             }
             Err(e) => say(&format!("scrcpy did not start: {e}")),
         }
@@ -231,9 +261,13 @@ pub fn pair(status: Status, name: String, password: String) {
                 say("Pairing…");
                 let out = adb(&["pair", &addr, &password], 20).unwrap_or_default().to_lowercase();
                 if out.contains("success") {
+                    say("Paired. Connecting…");
                     std::thread::sleep(Duration::from_millis(1500));
-                    let _ = find();
-                    say("Paired. The phone screen works over Wi-Fi now.");
+                    if find().is_some() {
+                        say("Paired and connected. Press Show my phone.");
+                    } else {
+                        say("Paired, but the phone does not answer yet: switch Wireless debugging off and on on the phone, then press Show my phone.");
+                    }
                 } else {
                     say("Pairing failed. Try again.");
                 }
