@@ -10,3 +10,4 @@
 /phone/*.apk
 *.keystore
 /.uploads/
+.hearth-tmp-*
