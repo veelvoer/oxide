@@ -142,7 +142,20 @@ pub fn start(name: String, token: Arc<Mutex<String>>, last: String, wake: impl F
             loop {
                 match req_rx.recv_timeout(Duration::from_millis(250)) {
                     Ok(req) => {
-                        if write_msg(&mut writer, &req).is_err() {
+                        // everything that piled up while the last packet was on its way goes out as one: Bluetooth
+                        // moves a few packets a second when idle, so one pointer move per frame would crawl
+                        let mut batch = vec![req];
+                        while let Ok(more) = req_rx.try_recv() {
+                            batch.push(more);
+                        }
+                        let mut failed = false;
+                        for r in merge(batch) {
+                            if write_msg(&mut writer, &r).is_err() {
+                                failed = true;
+                                break;
+                            }
+                        }
+                        if failed {
                             break;
                         }
                     }
@@ -166,3 +179,46 @@ pub fn start(name: String, token: Arc<Mutex<String>>, last: String, wake: impl F
     Link { tx, rx }
 }
 
+
+/// Join neighbours that say the same thing: pointer moves add up, the last absolute position wins.
+fn merge(batch: Vec<WatchReq>) -> Vec<WatchReq> {
+    use oxide_remote_proto::ToPc;
+    let mut out: Vec<WatchReq> = Vec::with_capacity(batch.len());
+    for r in batch {
+        let joined = match (out.last_mut(), &r) {
+            (Some(WatchReq::Send { msg: ToPc::PointerBy { dx, dy } }), WatchReq::Send { msg: ToPc::PointerBy { dx: x2, dy: y2 } }) => {
+                *dx += x2;
+                *dy += y2;
+                true
+            }
+            (Some(WatchReq::Send { msg: ToPc::Scroll { dx, dy } }), WatchReq::Send { msg: ToPc::Scroll { dx: x2, dy: y2 } }) => {
+                *dx += x2;
+                *dy += y2;
+                true
+            }
+            (Some(WatchReq::Send { msg: last @ ToPc::PointerTo { .. } }), WatchReq::Send { msg: new @ ToPc::PointerTo { .. } }) => {
+                *last = new.clone();
+                true
+            }
+            _ => false,
+        };
+        if !joined {
+            out.push(r);
+        }
+    }
+    out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use oxide_remote_proto::ToPc;
+
+    #[test]
+    fn pointer_moves_are_joined() {
+        let m = |dx: f64| WatchReq::Send { msg: ToPc::PointerBy { dx, dy: 1.0 } };
+        let out = merge(vec![m(1.0), m(2.0), WatchReq::Send { msg: ToPc::Click { button: "left".into() } }, m(4.0)]);
+        assert_eq!(out.len(), 3);
+        assert_eq!(out[0], WatchReq::Send { msg: ToPc::PointerBy { dx: 3.0, dy: 2.0 } });
+    }
+}

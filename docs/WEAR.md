@@ -38,6 +38,10 @@ The PCs are the ones paired with the phone: nothing to pair on the watch.
 
 ## The gyro mouse
 
+Two modes (Setup > Cursor > Gyro): **Move** turns the wrist into mouse movement (rest your arm to stop), **Point** puts the
+pointer where your arm points (about 35° sideways reaches the screen's edge at speed 1; tap the middle to center). Set
+*Worn on right wrist* if you wear it on the right.
+
 The pointer follows the wrist's rotation (gyroscope). **A pinch is detected from the accelerometer**: Wear OS has no
 public pinch API, so the app listens for the short sharp tap a pinch makes while the wrist is steady. One pinch =
 left click, three quick pinches = right click. This is a heuristic: try it in Setup > Cursor (it counts the pinches it

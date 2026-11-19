@@ -379,11 +379,26 @@ pub fn input(app: &mut App, ui: &mut Ui) {
         }
     });
     card(ui, "Touchpad", |ui| {
-        toggle_row(ui, "Natural scrolling", "Content follows your fingers, like a phone.", false, &mut i.natural_scroll);
-        toggle_row(ui, "Tap to click", "", !adv, &mut i.tap_to_click);
+        toggle_row(ui, "Natural scrolling", "Content follows your fingers, like a phone. Only for the touchpad: the mouse has its own switch below.", false, &mut i.natural_scroll);
+        toggle_row(ui, "Tap to click", "", false, &mut i.tap_to_click);
+        choice_row(
+            ui,
+            "Swipe between workspaces",
+            "Swipe sideways with this many fingers to go to the next or previous workspace.",
+            false,
+            &mut i.swipe_fingers,
+            &[(0u32, "Off"), (2, "2"), (3, "3"), (4, "4")],
+        );
+        if i.swipe_fingers > 0 {
+            toggle_row(ui, "Reverse the swipe", "Swiping left goes to the previous workspace instead of the next.", false, &mut i.swipe_invert);
+            slider_row(ui, "Swipe distance", "How far the fingers travel before the workspace changes. Smaller is more sensitive.", !adv, &mut i.swipe_distance, 20.0..=200.0, "");
+        }
         if adv {
             toggle_row(ui, "Pause while typing", "Ignore the touchpad while you type.", true, &mut i.disable_while_typing);
         }
+    });
+    card(ui, "Mouse", |ui| {
+        toggle_row(ui, "Natural scrolling", "The wheel scrolls the content the way a touchpad does. Off is the classic wheel.", true, &mut i.mouse_natural_scroll);
     });
     if adv {
         card(ui, "Pointer (advanced)", |ui| {

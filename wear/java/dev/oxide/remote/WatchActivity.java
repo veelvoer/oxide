@@ -35,6 +35,12 @@ public class WatchActivity extends OxideActivity implements SensorEventListener 
 
     // pinch: a short sharp tap on the accelerometer while the wrist is steady. Taps that follow each other within
     // 350 ms count together (1 = click, 3 = right click).
+    private boolean absolute = false;
+    private float armSign = 1f;
+    private float armYaw = 0, armPitch = 0;
+    private boolean armOk = false;
+    private final float[] rot = new float[9];
+
     private float[] prevAcc = null;
     private long lastSpike = 0;
     private int spikes = 0;
@@ -122,12 +128,22 @@ public class WatchActivity extends OxideActivity implements SensorEventListener 
     }
 
     /** Switch the sensors on or off. level: how hard a pinch must tap (lower = more sensitive). */
-    public synchronized void motion(boolean enable, boolean pinch, float level) {
+    public synchronized void motion(boolean enable, boolean pinch, float level, boolean abs, float sign) {
         pinchOn = pinch;
         pinchLevel = level;
+        armSign = sign;
+        if (enable && on && abs != absolute) {
+            // the mode changed: start the sensors again
+            sm.unregisterListener(this);
+            on = false;
+        }
+        absolute = abs;
         if (enable == on || sm == null) return;
         on = enable;
         if (enable) {
+            armOk = false;
+            Sensor rv = abs ? sm.getDefaultSensor(Sensor.TYPE_GAME_ROTATION_VECTOR) : null;
+            if (rv != null) sm.registerListener(this, rv, SensorManager.SENSOR_DELAY_GAME);
             Sensor g = sm.getDefaultSensor(Sensor.TYPE_GYROSCOPE);
             Sensor a = sm.getDefaultSensor(Sensor.TYPE_ACCELEROMETER);
             // SENSOR_DELAY_GAME is about 50 Hz: smooth enough for a pointer, light on the battery
@@ -154,7 +170,7 @@ public class WatchActivity extends OxideActivity implements SensorEventListener 
             ready = spikes;
             spikes = 0;
         }
-        float[] r = { yaw, pitch, ready };
+        float[] r = { yaw, pitch, ready, armYaw, armPitch, armOk ? 1f : 0f };
         yaw = pitch = 0;
         ready = 0;
         return r;
@@ -162,7 +178,14 @@ public class WatchActivity extends OxideActivity implements SensorEventListener 
 
     @Override
     public synchronized void onSensorChanged(SensorEvent e) {
-        if (e.sensor.getType() == Sensor.TYPE_GYROSCOPE) {
+        if (e.sensor.getType() == Sensor.TYPE_GAME_ROTATION_VECTOR) {
+            // where the arm points: the watch's x axis (toward the hand on the left wrist) in the world
+            SensorManager.getRotationMatrixFromVector(rot, e.values);
+            float vx = armSign * rot[0], vy = armSign * rot[3], vz = armSign * rot[6];
+            armYaw = (float) Math.atan2(vx, vy);
+            armPitch = (float) Math.asin(Math.max(-1f, Math.min(1f, vz)));
+            armOk = true;
+        } else if (e.sensor.getType() == Sensor.TYPE_GYROSCOPE) {
             long t = e.timestamp;
             if (lastGyro != 0) {
                 float dt = (t - lastGyro) / 1e9f;
@@ -195,7 +218,7 @@ public class WatchActivity extends OxideActivity implements SensorEventListener 
 
     @Override
     protected void onPause() {
-        if (on) motion(false, pinchOn, pinchLevel);
+        if (on) motion(false, pinchOn, pinchLevel, absolute, armSign);
         super.onPause();
     }
 }

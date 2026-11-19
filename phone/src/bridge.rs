@@ -136,6 +136,7 @@ pub fn serve(dir: &Path, phone_name: &str, mut input: impl Read, output: impl Wr
     let mut watch_name = String::new();
     let session_gen = Arc::new(AtomicU64::new(0));
     let mut to_pc: Option<std::sync::mpsc::Sender<ToPc>> = None;
+    let mut glide: Option<std::sync::mpsc::Sender<(f64, f64)>> = None;
     loop {
         let Ok(req) = read_msg::<WatchReq>(&mut input) else { break };
         match req {
@@ -177,11 +178,13 @@ pub fn serve(dir: &Path, phone_name: &str, mut input: impl Read, output: impl Wr
                 let store = Store::load(dir.to_path_buf());
                 let gen = session_gen.fetch_add(1, Ordering::SeqCst) + 1;
                 to_pc = None;
+                glide = None;
                 let Some(pc) = store.pcs.iter().find(|p| p.id == id).cloned() else {
                     send(&out, &WatchResp::OpenFailed { error: "The phone does not know this PC any more.".into() });
                     continue;
                 };
                 let session = net::open(&pc, &store.phone_id, || {});
+                glide = Some(smoother(session.to_pc.clone()));
                 to_pc = Some(session.to_pc);
                 let (out2, gen_now) = (out.clone(), session_gen.clone());
                 std::thread::spawn(move || {
@@ -207,6 +210,12 @@ pub fn serve(dir: &Path, phone_name: &str, mut input: impl Read, output: impl Wr
             WatchReq::Close => {
                 session_gen.fetch_add(1, Ordering::SeqCst);
                 to_pc = None;
+                glide = None;
+            }
+            WatchReq::Send { msg: ToPc::PointerBy { dx, dy } } => {
+                if let Some(g) = &glide {
+                    let _ = g.send((dx, dy));
+                }
             }
             WatchReq::Send { msg } => {
                 // the watch only drives the pointer, the keyboard and the actions: no screen frames
@@ -228,6 +237,50 @@ fn watch_name_or(n: &str) -> String {
     } else {
         n.to_string()
     }
+}
+
+/// Pointer moves from the watch arrive in bursts (Bluetooth carries a few packets a second when it is idle). This hands
+/// them to the PC spread over time instead, so the pointer glides: each tick moves a share of what is still owed.
+fn smoother(to_pc: std::sync::mpsc::Sender<ToPc>) -> std::sync::mpsc::Sender<(f64, f64)> {
+    let (tx, rx) = std::sync::mpsc::channel::<(f64, f64)>();
+    std::thread::spawn(move || {
+        const TICK: Duration = Duration::from_millis(8);
+        // how quickly what is owed is paid: about 45 ms
+        let share = 1.0 - (-(TICK.as_secs_f64()) / 0.045).exp();
+        let (mut ox, mut oy) = (0.0f64, 0.0f64);
+        loop {
+            let first = if ox.abs() < 0.01 && oy.abs() < 0.01 {
+                // nothing owed: wait for the next move (the thread ends when the link does)
+                match rx.recv() {
+                    Ok(m) => Some(m),
+                    Err(_) => return,
+                }
+            } else {
+                match rx.recv_timeout(TICK) {
+                    Ok(m) => Some(m),
+                    Err(std::sync::mpsc::RecvTimeoutError::Timeout) => None,
+                    Err(_) => return,
+                }
+            };
+            if let Some((dx, dy)) = first {
+                ox += dx;
+                oy += dy;
+                while let Ok((dx, dy)) = rx.try_recv() {
+                    ox += dx;
+                    oy += dy;
+                }
+            }
+            let (mx, my) = (ox * share, oy * share);
+            // the last bit is paid at once
+            let (mx, my) = if ox.abs() < 0.6 && oy.abs() < 0.6 { (ox, oy) } else { (mx, my) };
+            ox -= mx;
+            oy -= my;
+            if (mx != 0.0 || my != 0.0) && to_pc.send(ToPc::PointerBy { dx: mx, dy: my }).is_err() {
+                return;
+            }
+        }
+    });
+    tx
 }
 
 /// The PCs at once (state unknown), then again as each one answers.

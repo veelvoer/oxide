@@ -10,6 +10,9 @@ Item {
     property var shell
     readonly property string kind: opts.style || "numbers"
     readonly property bool showEmpty: opts.showEmpty === true
+    // how the highlight follows a workspace switch: a wait before it starts, and how long the move takes
+    readonly property int hlDelay: opts.highlightDelay !== undefined ? opts.highlightDelay : 0
+    readonly property int hlSpeed: opts.highlightSpeed !== undefined ? opts.highlightSpeed : (Theme.expressive ? 460 : 320)
     implicitWidth: row.implicitWidth
     implicitHeight: 26
 
@@ -112,8 +115,18 @@ Item {
         Timer { id: settle; interval: 16; onTriggered: marker.stretch = 0 }
         transform: Scale { origin.x: marker.width / 2; xScale: Theme.expressive ? 1 + marker.stretch / Math.max(1, marker.width) : 1 }
         Behavior on stretch { NumberAnimation { duration: 180; easing.type: Easing.OutCubic } }
-        Behavior on x { NumberAnimation { duration: Theme.expressive ? 460 * Theme.motionScale : 320; easing.type: Easing.OutBack; easing.overshoot: Theme.expressive ? 1.3 : 0.9 } }
-        Behavior on width { NumberAnimation { duration: Theme.spatial; easing.type: Theme.spatialType; easing.overshoot: Theme.overshoot } }
+        Behavior on x {
+            SequentialAnimation {
+                PauseAnimation { duration: root.hlDelay * Theme.motionScale }
+                NumberAnimation { duration: root.hlSpeed * Theme.motionScale; easing.type: Easing.OutBack; easing.overshoot: Theme.expressive ? 1.3 : 0.9 }
+            }
+        }
+        Behavior on width {
+            SequentialAnimation {
+                PauseAnimation { duration: root.hlDelay * Theme.motionScale }
+                NumberAnimation { duration: root.hlSpeed * Theme.motionScale; easing.type: Theme.spatialType; easing.overshoot: Theme.overshoot }
+            }
+        }
     }
     WheelHandler { onWheel: e => OxideState.dispatch({ "type": "workspace_existing", "arg": e.angleDelta.y < 0 ? 1 : -1 }) }
 }

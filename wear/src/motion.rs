@@ -6,6 +6,8 @@ pub struct Motion {
     pub pitch: f32,
     /// pinches that just ended (1 = click, 3 = right click)
     pub pinches: u32,
+    /// where the arm points (yaw, pitch in radians), in the pointing mode
+    pub arm: Option<(f32, f32)>,
 }
 
 #[cfg(target_os = "android")]
@@ -33,8 +35,8 @@ mod imp {
         r.ok()
     }
 
-    pub fn enable(on: bool, pinch: bool, level: f32) {
-        call(|env, a| env.call_method(a, "motion", "(ZZF)V", &[JValue::Bool(on as u8), JValue::Bool(pinch as u8), JValue::Float(level)]).map(|_| ()));
+    pub fn enable(on: bool, pinch: bool, level: f32, absolute: bool, arm_sign: f32) {
+        call(|env, a| env.call_method(a, "motion", "(ZZFZF)V", &[JValue::Bool(on as u8), JValue::Bool(pinch as u8), JValue::Float(level), JValue::Bool(absolute as u8), JValue::Float(arm_sign)]).map(|_| ()));
     }
 
     pub fn has_gyro() -> bool {
@@ -45,9 +47,9 @@ mod imp {
         call(|env, a| {
             let o = env.call_method(a, "motionPoll", "()[F", &[])?.l()?;
             let arr = jni::objects::JFloatArray::from(o);
-            let mut v = [0f32; 3];
+            let mut v = [0f32; 6];
             env.get_float_array_region(&arr, 0, &mut v)?;
-            Ok(Motion { yaw: v[0], pitch: v[1], pinches: v[2] as u32 })
+            Ok(Motion { yaw: v[0], pitch: v[1], pinches: v[2] as u32, arm: (v[5] > 0.5).then_some((v[3], v[4])) })
         })
         .unwrap_or_default()
     }
@@ -56,7 +58,7 @@ mod imp {
 #[cfg(not(target_os = "android"))]
 mod imp {
     use super::Motion;
-    pub fn enable(_: bool, _: bool, _: f32) {}
+    pub fn enable(_: bool, _: bool, _: f32, _: bool, _: f32) {}
     pub fn has_gyro() -> bool {
         true
     }

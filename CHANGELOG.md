@@ -2,6 +2,13 @@
 
 ## 0.2.0 (unreleased)
 
+* New: natural scrolling is set apart for the **touchpad and the mouse** (`mouse_natural_scroll`).
+* New: **swipe between workspaces** with a set number of fingers on the touchpad (2, 3 or 4; Settings > Input).
+* New: the bar's workspace highlight has a **delay and a move time** (Settings > Bar > Workspaces).
+* Watch: made for the round screen (lists and rings that follow the circle, scrolling with momentum and the bezel), a
+  smoother touchpad (pointer moves are joined on the Bluetooth link and glided by the phone), and the gyro mouse has
+  two modes: *Move* (like a mouse) and *Point* (the pointer goes where the arm points).
+
 * New: the **watch works without Wi-Fi**: it talks to the phone over Bluetooth and the phone passes everything to the PCs
   (phone app: Settings > My watch). The watch is paired with the phone by a 6-digit code and shows the phone's PCs.
 

@@ -10,6 +10,7 @@ pub mod theme;
 pub mod app;
 pub mod link;
 pub mod motion;
+pub mod round;
 pub mod settings;
 
 #[cfg(target_os = "android")]

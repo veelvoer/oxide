@@ -316,7 +316,16 @@ pub struct Input {
     pub kb_options: String,
     pub repeat_rate: i32,
     pub repeat_delay: i32,
+    /// Natural scrolling on touchpads (content follows the fingers).
     pub natural_scroll: bool,
+    /// Natural scrolling on mice and other pointers with a wheel, set apart from the touchpad's.
+    pub mouse_natural_scroll: bool,
+    /// Swipe with this many fingers on a touchpad to go to the next / previous workspace (0 = off).
+    pub swipe_fingers: u32,
+    /// Swiping left goes to the previous workspace instead of the next one.
+    pub swipe_invert: bool,
+    /// How far the fingers must travel (touchpad units) before the workspace changes.
+    pub swipe_distance: f64,
     pub tap_to_click: bool,
     pub disable_while_typing: bool,
     pub sensitivity: f64,
@@ -648,6 +657,10 @@ impl Default for Input {
             repeat_rate: 25,
             repeat_delay: 600,
             natural_scroll: true,
+            mouse_natural_scroll: false,
+            swipe_fingers: 3,
+            swipe_invert: false,
+            swipe_distance: 60.0,
             tap_to_click: true,
             disable_while_typing: true,
             sensitivity: 0.0,

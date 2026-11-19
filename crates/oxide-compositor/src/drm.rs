@@ -394,7 +394,9 @@ impl Oxide {
             let _ = device.config_tap_set_enabled(c.tap_to_click);
         }
         if device.config_scroll_has_natural_scroll() {
-            let _ = device.config_scroll_set_natural_scroll_enabled(c.natural_scroll);
+            // a touchpad and a mouse are set apart: natural scrolling feels right on one and wrong on the other
+            let touchpad = device.config_tap_finger_count() > 0;
+            let _ = device.config_scroll_set_natural_scroll_enabled(if touchpad { c.natural_scroll } else { c.mouse_natural_scroll });
         }
         if device.config_dwt_is_available() {
             let _ = device.config_dwt_set_enabled(c.disable_while_typing);

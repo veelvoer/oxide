@@ -33,7 +33,10 @@ show builds, errors, calls and CPU load);
 |---|---|---|
 | `kb_layout`, `kb_variant`, `kb_options` | detected from your system (`XKB_DEFAULT_LAYOUT`, `/etc/default/keyboard`, X11 config, console keymap), else `us` | xkb names, e.g. `kb_layout = "us,de"`, `kb_options = "grp:alt_shift_toggle"` |
 | `repeat_rate` / `repeat_delay` | 25 / 600 | |
-| `natural_scroll` | true | |
+| `natural_scroll` | true | touchpads only |
+| `mouse_natural_scroll` | false | mice and other wheels: set apart from the touchpad's |
+| `swipe_fingers` | 3 | swipe sideways with this many fingers on a touchpad: next / previous workspace (0 = off) |
+| `swipe_invert`, `swipe_distance` | false, 60 | reverse the direction; how far the fingers must travel |
 | `tap_to_click`, `disable_while_typing` | true | touchpads |
 | `sensitivity` | 0.0 | −1.0 … 1.0 |
 | `accel_profile` | `flat` | `flat` or `adaptive` |

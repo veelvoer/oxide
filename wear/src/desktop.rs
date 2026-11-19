@@ -12,6 +12,10 @@ impl eframe::App for Root {
         ui.scope_builder(egui::UiBuilder::new().max_rect(r), |ui| {
             ui.set_clip_rect(r);
             self.0.frame(ui);
+            // the real screen is round: what is outside the circle is hidden
+            let ring = 24.0;
+            ui.painter().circle_stroke(r.center(), 112.5 + ring / 2.0 + 0.5, egui::Stroke::new(ring + 2.0, egui::Color32::from_gray(40)));
+            ui.painter().circle_stroke(r.center(), 112.5 + 1.0 + 32.0, egui::Stroke::new(64.0, egui::Color32::from_gray(40)));
         });
     }
 }

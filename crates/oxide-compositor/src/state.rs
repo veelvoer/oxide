@@ -185,6 +185,8 @@ pub struct Oxide {
     pub lid_pending: Option<(std::time::Instant, String)>,
     pub lid_inhibitor: Option<std::process::Child>,
     pub idle_suspended_at: Option<std::time::Instant>,
+    /// A swipe on a touchpad in progress: (fingers, distance since the last workspace change).
+    pub swipe: Option<(u32, f64)>,
     pub binds: Vec<CompiledBind>,
     /// Keys whose press triggered a bind; their release is not forwarded.
     pub suppressed: Vec<Keysym>,
@@ -422,6 +424,7 @@ impl Oxide {
             lid_pending: None,
             lid_inhibitor: None,
             idle_suspended_at: None,
+            swipe: None,
             space: Space::default(),
             popups: PopupManager::default(),
             wins: vec![],

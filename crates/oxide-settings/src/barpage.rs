@@ -52,6 +52,8 @@ const DEFS: &[Def] = &[
     Def { id: "workspaces", label: "Workspaces", icon: "view-grid-outline", about: "Workspace switcher.", opts: &[
         Opt::Choice("style", "Look", &[("numbers", "Numbers"), ("dots", "Dots"), ("bars", "Bars")], "numbers"),
         Opt::Bool("showEmpty", "Show empty workspaces", false),
+        Opt::Int("highlightDelay", "Highlight delay (ms)", 0, 800, 0),
+        Opt::Int("highlightSpeed", "Highlight move time (ms)", 60, 1000, 460),
     ] },
     Def { id: "window", label: "Window title", icon: "application-outline", about: "Title of the focused window.", opts: &[
         Opt::Bool("showIcon", "Show app icon", true),

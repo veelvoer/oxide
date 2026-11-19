@@ -31,6 +31,32 @@ impl Oxide {
         self.idle_notifier_state.notify_activity(&self.seat);
         self.last_input = std::time::Instant::now();
         match event {
+            InputEvent::GestureSwipeBegin { event } => {
+                use smithay::backend::input::GestureBeginEvent;
+                self.swipe = Some((event.fingers(), 0.0));
+            }
+            InputEvent::GestureSwipeUpdate { event } => {
+                use smithay::backend::input::GestureSwipeUpdateEvent;
+                let (want, dist, invert) = (self.config.input.swipe_fingers, self.config.input.swipe_distance.max(10.0), self.config.input.swipe_invert);
+                let step = match &mut self.swipe {
+                    Some((fingers, dx)) if want > 0 && *fingers == want => {
+                        *dx += event.delta_x();
+                        if dx.abs() >= dist {
+                            // fingers moving left bring the next workspace in, like turning a page
+                            let dir = if *dx < 0.0 { 1 } else { -1 };
+                            *dx = 0.0;
+                            Some(if invert { -dir } else { dir })
+                        } else {
+                            None
+                        }
+                    }
+                    _ => None,
+                };
+                if let Some(d) = step {
+                    self.dispatch_action(&oxide_config::Action::WorkspaceExisting(d));
+                }
+            }
+            InputEvent::GestureSwipeEnd { .. } => self.swipe = None,
             InputEvent::SwitchToggle { event } => {
                 use smithay::backend::input::{Switch, SwitchState, SwitchToggleEvent};
                 if event.switch() == Some(Switch::Lid) {
