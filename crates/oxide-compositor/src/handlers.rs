@@ -390,6 +390,22 @@ impl SeatHandler for Oxide {
     }
 
     fn cursor_image(&mut self, _seat: &Seat<Self>, image: smithay::input::pointer::CursorImageStatus) {
+        // X11 menus and dropdowns (override-redirect windows) have no cursor of their own: XWayland then asks for none
+        // and the pointer would vanish over them. The normal arrow is what the user expects there.
+        if matches!(image, smithay::input::pointer::CursorImageStatus::Hidden) {
+            use smithay::{wayland::seat::WaylandFocus, xwayland::xwm::WmWindowType as T};
+            let popup_like = |w: &smithay::desktop::Window| {
+                w.x11_surface().is_some_and(|x| matches!(x.window_type(), Some(T::DropdownMenu | T::Menu | T::PopupMenu | T::Tooltip | T::Notification)))
+            };
+            let over_popup = self.pointer.current_focus().is_some_and(|f| {
+                self.or_windows.iter().any(|w| w.wl_surface().is_some_and(|s| *s == f))
+                    || self.wins.iter().any(|w| popup_like(&w.window) && w.window.wl_surface().is_some_and(|s| *s == f))
+            });
+            if over_popup {
+                self.cursor_status = smithay::input::pointer::CursorImageStatus::default_named();
+                return;
+            }
+        }
         self.cursor_status = image;
     }
 }

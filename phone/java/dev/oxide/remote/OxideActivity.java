@@ -36,9 +36,18 @@ public class OxideActivity extends NativeActivity {
     // system bars and keyboard, in pixels: top, bottom, left, right, keyboard
     private volatile int[] insets = new int[5];
     // update: 0 idle, 1 downloading, 2 waiting for the user, 3 failed; progress 0..100
-    private volatile int updateState = 0;
-    private volatile int updateProgress = 0;
-    private volatile String updateError = "";
+    private static volatile int updateState = 0;
+    private static volatile int updateProgress = 0;
+    private static volatile String updateError = "";
+
+    static void updateFailed(String why) {
+        updateError = why;
+        updateState = 3;
+    }
+
+    static void updateInstalled() {
+        updateState = 4;
+    }
 
     @Override
     protected void onCreate(Bundle state) {
@@ -271,6 +280,7 @@ public class OxideActivity extends NativeActivity {
                 PackageInstaller pi = getPackageManager().getPackageInstaller();
                 PackageInstaller.SessionParams p = new PackageInstaller.SessionParams(PackageInstaller.SessionParams.MODE_FULL_INSTALL);
                 p.setAppPackageName(getPackageName());
+                if (Build.VERSION.SDK_INT >= 31) p.setRequireUserAction(PackageInstaller.SessionParams.USER_ACTION_NOT_REQUIRED);
                 int id = pi.createSession(p);
                 try (PackageInstaller.Session s = pi.openSession(id)) {
                     try (OutputStream out = s.openWrite("base.apk", 0, apk.length()); InputStream in = new FileInputStream(apk)) {
@@ -279,12 +289,12 @@ public class OxideActivity extends NativeActivity {
                         while ((n = in.read(b)) > 0) out.write(b, 0, n);
                         s.fsync(out);
                     }
-                    Intent back = new Intent(this, OxideActivity.class).setAction("dev.oxide.remote.INSTALL").addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP);
+                    Intent back = new Intent(this, InstallReceiver.class).setPackage(getPackageName());
                     int flags = PendingIntent.FLAG_UPDATE_CURRENT | (Build.VERSION.SDK_INT >= 31 ? PendingIntent.FLAG_MUTABLE : 0);
-                    PendingIntent pend = PendingIntent.getActivity(this, 7, back, flags);
+                    PendingIntent pend = PendingIntent.getBroadcast(this, 7, back, flags);
                     s.commit(pend.getIntentSender());
                 }
-                updateState = 2;
+                updateState = 2; // handed to Android; the installer answers through InstallReceiver
             } catch (Exception e) {
                 updateError = String.valueOf(e.getMessage());
                 updateState = 3;

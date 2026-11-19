@@ -1,0 +1,42 @@
+[package]
+name = "oxide-watch-app"
+version = "0.1.0"
+edition = "2021"
+license = "GPL-3.0-or-later"
+description = "Oxide Remote for Wear OS: touchpad, gyro mouse, controls and stats for your PCs on your wrist"
+
+# not part of the main workspace: it is built for Android with cargo-ndk (scripts/build-apk.sh)
+[workspace]
+
+[lib]
+name = "oxide_remote_watch"
+crate-type = ["cdylib", "rlib"]
+
+[[bin]]
+name = "oxide-watch-desktop"
+path = "src/desktop.rs"
+
+[dependencies]
+egui = "0.37"
+log = "0.4"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+image = { version = "0.25", default-features = false, features = ["jpeg"] }
+oxide-remote-proto = { path = "../crates/oxide-remote-proto" }
+
+[target.'cfg(target_os = "android")'.dependencies]
+android-activity = { version = "0.6", features = ["native-activity"] }
+android_logger = "0.15"
+jni = "0.21"
+eframe = { version = "0.37", default-features = false, features = ["glow", "android-native-activity", "default_fonts"] }
+
+[target.'cfg(not(target_os = "android"))'.dependencies]
+eframe = { version = "0.37", default-features = false, features = ["glow", "wayland", "x11", "default_fonts"] }
+
+# small and fast to start: a watch has little memory
+[profile.release]
+opt-level = "s"
+lto = "fat"
+codegen-units = 1
+strip = true
+panic = "unwind"

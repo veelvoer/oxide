@@ -11,3 +11,8 @@
 *.keystore
 /.uploads/
 .hearth-tmp-*
+/phone/*.idsig
+/wear/build
+/wear/target
+/wear/*.apk
+/wear/*.idsig

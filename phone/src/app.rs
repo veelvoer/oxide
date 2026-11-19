@@ -754,10 +754,15 @@ impl App {
                             ui.label(RichText::new(format!("Version {v} is available")).font(medium(16.0)).color(p.on_container));
                             ui.label(RichText::new(match state {
                                 1 => format!("Downloading… {prog}%"),
-                                2 => "Confirm the update on the next screen".into(),
+                                2 => "Installing… tap Update if Android asks".into(),
                                 3 => platform::update_error(),
+                                4 => "Installed. The app restarts".into(),
                                 _ => format!("You have {VERSION}"),
                             }).size(13.5).color(p.on_container.gamma_multiply(0.8)));
+                            if state == 1 {
+                                ui.add_space(6.0);
+                                ui::bar(ui, prog as f32 / 100.0, p.accent);
+                            }
                         });
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                             if state == 1 {
@@ -770,7 +775,7 @@ impl App {
                 });
                 ui.add_space(12.0);
                 if state == 1 || state == 2 {
-                    ui.ctx().request_repaint_after(Duration::from_millis(250));
+                    ui.ctx().request_repaint_after(Duration::from_millis(120));
                 }
             }
             if self.store.pcs.is_empty() {

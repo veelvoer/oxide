@@ -178,13 +178,31 @@ impl Oxide {
             ws = g;
             floating = false;
         }
+        if let Some(x) = window.x11_surface() {
+            info!(app_id, title, ?floating, wtype = ?x.window_type(), geo = ?x.geometry(), popup = x.is_popup(), transient = ?x.is_transient_for(), decorated = x.is_decorated(), "x11 window");
+        }
+        // X11 menus and dropdown lists that are ordinary windows (Unity's popups) put themselves where they belong, at
+        // their own size; centring them at the usual floating size leaves most of the window empty
+        let bs = self.config.general.border_size.max(0);
+        let popup_geo = window.x11_surface().filter(|x| {
+            use smithay::xwayland::xwm::WmWindowType as T;
+            matches!(x.window_type(), Some(T::DropdownMenu | T::Menu | T::PopupMenu | T::Tooltip | T::Notification))
+                && x.geometry().size.w > 0
+                && x.geometry().size.h > 0
+        }).map(|x| {
+            let g = x.geometry();
+            Rectangle::new((g.loc.x - bs, g.loc.y - bs).into(), (g.size.w + 2 * bs, g.size.h + 2 * bs).into())
+        });
+        if popup_geo.is_some() {
+            floating = true;
+        }
         info!(app_id, title, ws, floating, "mapping window");
         self.wins.push(Win {
             window: window.clone(),
             ws,
             floating,
             fullscreen: false,
-            float_geo: None,
+            float_geo: popup_geo,
             fixed: fixed_size(&window),
             rect: Rectangle::default(),
             base: RectF::default(),

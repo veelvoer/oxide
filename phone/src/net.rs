@@ -10,6 +10,16 @@ use oxide_remote_proto::*;
 
 use crate::store::Pc;
 
+/// The phone's own address on its network (no packet is sent: connecting a UDP socket only picks the route).
+fn own_subnet() -> Option<[u8; 4]> {
+    let s = UdpSocket::bind("0.0.0.0:0").ok()?;
+    s.connect("192.0.2.1:9").ok()?;
+    match s.local_addr().ok()?.ip() {
+        std::net::IpAddr::V4(v) => Some(v.octets()),
+        _ => None,
+    }
+}
+
 /// Look for PCs on the network for `wait`.
 pub fn discover(wait: Duration) -> Vec<(Announce, String)> {
     let mut found: Vec<(Announce, String)> = vec![];
@@ -23,6 +33,18 @@ pub fn discover(wait: Duration) -> Vec<(Announce, String)> {
         // send a few times: a single UDP packet gets lost on busy Wi-Fi
         if sent < 3 && start.elapsed() >= Duration::from_millis(sent * 400) {
             let _ = sock.send_to(DISCOVER, ("255.255.255.255", DISCOVERY_PORT));
+            // networks that drop broadcasts (schools, hotels, some routers): the subnet's own broadcast address, and
+            // every address on the subnet one by one (on the second round, so a normal network answers quickly)
+            if let Some(o) = own_subnet() {
+                let _ = sock.send_to(DISCOVER, (std::net::Ipv4Addr::new(o[0], o[1], o[2], 255), DISCOVERY_PORT));
+                if sent == 1 {
+                    for h in 1..255u8 {
+                        if h != o[3] {
+                            let _ = sock.send_to(DISCOVER, (std::net::Ipv4Addr::new(o[0], o[1], o[2], h), DISCOVERY_PORT));
+                        }
+                    }
+                }
+            }
             sent += 1;
         }
         if let Ok((n, from)) = sock.recv_from(&mut buf) {
@@ -83,9 +105,16 @@ fn race(addrs: &[String], timeout: Duration) -> Option<(TcpStream, String)> {
     None
 }
 
-/// Look for this PC (by its id) on the network the phone is on now.
+/// Look for this PC on the network the phone is on now: by its id, or by its network card's MAC address (the same
+/// computer after the app or Oxide was set up again, or on another network with another IP address).
 fn find_on_network(pc: &Pc, wait: Duration) -> Option<String> {
-    discover(wait).into_iter().find(|(a, _)| a.id == pc.id).map(|(_, host)| host)
+    let norm = |m: &str| m.to_lowercase().replace('-', ":");
+    let mine: Vec<String> = pc.macs.iter().map(|m| norm(m)).collect();
+    let all = discover(wait);
+    all.iter()
+        .find(|(a, _)| a.id == pc.id)
+        .or_else(|| all.iter().find(|(a, _)| a.macs.iter().any(|m| mine.contains(&norm(m)))))
+        .map(|(_, host)| host.clone())
 }
 
 /// Where a PC was found.

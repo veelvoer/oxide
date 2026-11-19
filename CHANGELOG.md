@@ -2,6 +2,13 @@
 
 ## 0.2.0 (unreleased)
 
+* New: **Oxide Remote for Wear OS** (`wear/`, docs/WEAR.md): PC list with wake-up, touchpad or gyro mouse (pinch to
+  click), controls and stats as swipeable pages, theme (watch, color, PC), updates.
+* Fixed: X11 menus and dropdowns (Unity and others) keep the arrow cursor, and X11 popup windows appear at their own
+  place and size instead of as a large empty floating window.
+* Changed: phone app updates install through a broadcast receiver (as in Hearth), show a progress bar, and ask for
+  no extra confirmation when Android allows it. PCs are found again by their MAC address on any network (also where
+  broadcasts are blocked: the subnet is probed address by address).
 * New: **performance profiles** Eco / Normal / Performance in the control center (and Settings > Power, the
   `set_profile` action, `[power] profile`). Eco turns off blur, shadows and telemetry, halves animation times and sets
   the system's power mode; it can switch on by itself under a battery level. Your own settings are never overwritten.
