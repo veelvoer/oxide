@@ -60,7 +60,7 @@ Singleton {
     // motion: one curve, short durations
     readonly property var curve: [0.2, 0.8, 0.2, 1, 1, 1]
     // every duration goes through this factor (0 turns motion off)
-    property real motionScale: 1
+    property real motionScale: OxideState.profile === "eco" ? 0.55 : 1
     readonly property int fast: 110 * motionScale
     readonly property int normal: (expressive ? 240 : 200) * motionScale
     readonly property int slow: (expressive ? 380 : 320) * motionScale

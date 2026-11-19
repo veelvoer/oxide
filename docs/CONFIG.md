@@ -112,6 +112,25 @@ Groups of apps summoned and dismissed together with one key (`toggle_scratchpad`
 `enabled` (false): run `oxide-remoted` so paired phones can see and control this PC; `anywhere` (false): also over
 the internet (UPnP port forwarding, encrypted notes on `rendezvous`, default `https://ntfy.sh`); see [PHONE.md](PHONE.md).
 
+## `[power]`
+
+Performance profile, lid and idle. All of it is also in Settings > Power.
+
+| Key | Default | Meaning |
+|---|---|---|
+| `profile` | `"normal"` | `"eco"` (no blur/shadows/telemetry, short animations, power-saver), `"normal"`, `"performance"` |
+| `system_profile` | `true` | also set power-profiles-daemon (`powerprofilesctl`) |
+| `auto_eco_below` | `0` | on battery below this percentage Eco switches on by itself (0 = never) |
+| `lid_battery`, `lid_ac` | `"lock_suspend"`, `"lock"` | closing the lid: `lock_suspend`, `lock`, `suspend`, `nothing`, `system` (logind decides) |
+| `lid_ignore_external` | `true` | with an external screen the lid does nothing |
+| `lid_delay` | `0` | seconds the lid must stay closed |
+| `lock_before_sleep` | `true` | lock before every sleep |
+| `idle_lock_battery`, `idle_lock_ac` | `5`, `10` | minutes idle until the screen locks (0 = never) |
+| `idle_suspend_battery`, `idle_suspend_ac` | `15`, `0` | minutes idle until sleep (0 = never) |
+| `idle_inhibit_fullscreen` | `true` | no idle lock or sleep while a window is fullscreen |
+
+Oxide holds logind's lid-switch inhibitor while a lid action is set, so the system does not sleep before the screen is locked.
+
 ## `[update]`
 
 `auto` (true): look for a new version every few hours, build and install it at the lowest priority, show what

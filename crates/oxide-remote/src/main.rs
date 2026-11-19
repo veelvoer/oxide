@@ -6,6 +6,7 @@
 //!   oxide-remoted forget ID    unpair a phone
 //!   oxide-remoted rename NAME  the name phones see
 mod actions;
+mod assistant;
 mod capture;
 mod reach;
 mod server;

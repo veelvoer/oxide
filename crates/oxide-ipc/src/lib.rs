@@ -95,6 +95,15 @@ pub struct State {
     /// The Super key is being held on its own (the shell shows its ambient HUD while it is).
     #[serde(default)]
     pub super_held: bool,
+    /// The performance profile in force: "eco", "normal" or "performance".
+    #[serde(default)]
+    pub profile: String,
+    /// What the user chose (differs from `profile` while auto-eco is on).
+    #[serde(default)]
+    pub profile_choice: String,
+    /// Running on mains power.
+    #[serde(default)]
+    pub on_ac: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

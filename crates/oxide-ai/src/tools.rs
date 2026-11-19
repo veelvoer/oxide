@@ -54,7 +54,7 @@ pub fn definitions(cfg: &AiConfig) -> Vec<Value> {
     }));
     t.push(json!({
         "name": "oxide_dispatch",
-        "description": "Window-manager action, e.g. {\"type\":\"workspace\",\"arg\":3}. Types: close, toggle_floating, toggle_fullscreen, focus_dir/move_dir (left|right|up|down), workspace/move_to_workspace (number), workspace_rel/move_to_workspace_rel/workspace_existing (+1|-1), toggle_special, move_to_special, focus_monitor/move_to_monitor (direction), cycle_layout, grow_master, shrink_master, send_key (arg like \"alt+Left\"), reload_config.",
+        "description": "Window-manager action, e.g. {\"type\":\"workspace\",\"arg\":3}. Types: close, toggle_floating, toggle_fullscreen, focus_dir/move_dir (left|right|up|down), workspace/move_to_workspace (number), workspace_rel/move_to_workspace_rel/workspace_existing (+1|-1), toggle_special, move_to_special, focus_monitor/move_to_monitor (direction), cycle_layout, grow_master, shrink_master, send_key (arg like \"alt+Left\"), toggle_overview, lock, set_profile (arg eco|normal|performance), reload_config.",
         "input_schema": {"type": "object", "properties": {"action": {"type": "object", "properties": {"type": {"type": "string"}, "arg": {}}, "required": ["type"]}}, "required": ["action"], "additionalProperties": false}
     }));
     if cfg.allow_config {
@@ -63,7 +63,7 @@ pub fn definitions(cfg: &AiConfig) -> Vec<Value> {
             "description": "Oxide settings (gaps, borders, rounding, blur, animations, input, layout, monitors, rules, theme...). op=get [section] reads them; op=patch merges a JSON object, applies and saves. Call get for the section first to use exact key names. Arrays are replaced whole.",
             "input_schema": {"type": "object", "properties": {
                 "op": {"type": "string", "enum": ["get", "patch"]},
-                "section": {"type": "string", "description": "For get: general, decoration, animations, input, layout, monitor, bind, rule, shell, exec_once, env."},
+                "section": {"type": "string", "description": "For get: general, decoration, animations, input, layout, monitor, bind, rule, shell, power, remote, exec_once, env."},
                 "patch": {"type": "object"}
             }, "required": ["op"], "additionalProperties": false}
         }));

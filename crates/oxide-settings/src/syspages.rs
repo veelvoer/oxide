@@ -372,26 +372,41 @@ pub fn power(app: &mut App, ui: &mut Ui) {
             }
         });
     }
-    match &st.profile {
-        Some((cur, names)) => {
-            card(ui, "Performance", |ui| {
-                let mut chosen = cur.clone();
-                let opts: Vec<(String, &str)> = names.iter().map(|n| (n.clone(), n.as_str())).collect();
-                choice_row(ui, "Power mode", "Balance speed against battery life.", true, &mut chosen, &opts);
-                if chosen != *cur {
-                    let c = chosen.clone();
-                    app.jobs.spawn(&ctx, "Power mode", move || sys::run("powerprofilesctl", &["set", &c]).map(|_| "Power mode changed".into()));
-                }
-            });
-        }
-        None => {
-            if app.advanced {
-                unavailable(ui, "Power modes need power-profiles-daemon (powerprofilesctl). Install it to switch between saver and performance.");
-            }
-        }
-    }
-    if st.battery.is_none() && st.brightness.is_none() && st.profile.is_none() {
-        unavailable(ui, "Nothing to configure here: no battery, backlight or power daemon found.");
+    {
+        let p = &mut app.cfg.power;
+        card(ui, "Performance", |ui| {
+            choice_row(
+                ui,
+                "Profile",
+                "Eco: no blur or shadows, short animations, the system saves power. Performance: everything on, the system at full speed.",
+                false,
+                &mut p.profile,
+                &[("eco".to_string(), "Eco"), ("normal".to_string(), "Normal"), ("performance".to_string(), "Performance")],
+            );
+            toggle_row(ui, "Also set the system's power mode", "Switches power-profiles-daemon along with the profile (CPU speed, fan).", false, &mut p.system_profile);
+            slider_row(ui, "Eco when the battery is below", "Switches to Eco on battery by itself; 0 turns it off.", true, &mut p.auto_eco_below, 0..=50, "%");
+        });
+        let lid = [
+            ("lock_suspend".to_string(), "Lock and sleep"),
+            ("lock".to_string(), "Lock"),
+            ("suspend".to_string(), "Sleep"),
+            ("nothing".to_string(), "Nothing"),
+            ("system".to_string(), "System decides"),
+        ];
+        card(ui, "Closing the lid", |ui| {
+            choice_row(ui, "On battery", "What closing the lid does when unplugged.", false, &mut p.lid_battery, &lid);
+            choice_row(ui, "Plugged in", "What closing the lid does on mains power.", false, &mut p.lid_ac, &lid);
+            toggle_row(ui, "Keep going with an external screen", "With another screen connected, closing the lid does nothing.", false, &mut p.lid_ignore_external);
+            slider_row(ui, "Wait before acting", "Seconds the lid must stay closed; 0 acts at once.", false, &mut p.lid_delay, 0..=60, " s");
+            toggle_row(ui, "Lock before sleeping", "Always lock first, so waking up asks for your password.", true, &mut p.lock_before_sleep);
+        });
+        card(ui, "When idle", |ui| {
+            slider_row(ui, "Lock on battery after", "Minutes without input; 0 never.", false, &mut p.idle_lock_battery, 0..=60, " min");
+            slider_row(ui, "Lock plugged in after", "Minutes without input; 0 never.", false, &mut p.idle_lock_ac, 0..=120, " min");
+            slider_row(ui, "Sleep on battery after", "Minutes without input; 0 never.", false, &mut p.idle_suspend_battery, 0..=120, " min");
+            slider_row(ui, "Sleep plugged in after", "Minutes without input; 0 never.", false, &mut p.idle_suspend_ac, 0..=240, " min");
+            toggle_row(ui, "Not while a window is fullscreen", "Videos and games keep the screen awake.", true, &mut p.idle_inhibit_fullscreen);
+        });
     }
     app.power.value = Some(st);
 }

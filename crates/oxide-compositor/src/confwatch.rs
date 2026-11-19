@@ -7,7 +7,7 @@ use tracing::warn;
 
 use crate::state::Oxide;
 
-fn mtime() -> Option<std::time::SystemTime> {
+pub fn mtime() -> Option<std::time::SystemTime> {
     std::fs::metadata(oxide_config::Config::path()).and_then(|m| m.modified()).ok()
 }
 
@@ -44,7 +44,7 @@ impl Oxide {
         match oxide_config::Config::load() {
             Ok(c) => {
                 self.config_error = None;
-                if c != self.config {
+                if c != self.user_config {
                     self.apply_config(c);
                 }
                 Ok(())

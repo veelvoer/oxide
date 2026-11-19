@@ -29,7 +29,14 @@ enum Hit {
 impl Oxide {
     pub fn process_input_event<B: InputBackend>(&mut self, event: InputEvent<B>) {
         self.idle_notifier_state.notify_activity(&self.seat);
+        self.last_input = std::time::Instant::now();
         match event {
+            InputEvent::SwitchToggle { event } => {
+                use smithay::backend::input::{Switch, SwitchState, SwitchToggleEvent};
+                if event.switch() == Some(Switch::Lid) {
+                    self.lid_event(event.state() == SwitchState::On);
+                }
+            }
             InputEvent::Keyboard { event } => self.on_key::<B>(event),
             InputEvent::PointerMotionAbsolute { event } => {
                 // the nested test window can hold several monitors: the pointer then spans all of them

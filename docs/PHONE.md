@@ -62,6 +62,11 @@ and it switches itself off on another network (the app switches it back on when 
 
 `[remote] phone_max_size` (1600), `phone_bitrate` (12, Mbit/s), `phone_audio` (false: the phone's sound stays on the phone).
 
+## Assistant
+
+The Assistant tab talks to the PC's assistant (see ASSISTANT.md): "open Firefox", "lock the screen", "save battery".
+Needs the assistant set up on the PC (Settings > Assistant).
+
 ## Other networks (school, work, a friend's)
 
 The phone remembers each PC for good. When a PC is not at its last address (it is on another network, or got a new

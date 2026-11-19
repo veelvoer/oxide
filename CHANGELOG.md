@@ -2,6 +2,15 @@
 
 ## 0.2.0 (unreleased)
 
+* New: **performance profiles** Eco / Normal / Performance in the control center (and Settings > Power, the
+  `set_profile` action, `[power] profile`). Eco turns off blur, shadows and telemetry, halves animation times and sets
+  the system's power mode; it can switch on by itself under a battery level. Your own settings are never overwritten.
+* New: **the lid and idle**: closing the lid locks and/or sleeps (separately on battery and on mains, not with an external
+  screen, with a delay), idle lock and sleep timers, `lock` action. All in Settings > Power and `[power]`.
+* New: the assistant knows Oxide (built-in handbook: actions, config keys, recipes), so it needs fewer steps.
+* New: the phone app's **Assistant tab**: talk to the PC's assistant from the phone (answers word by word, confirmations
+  on the phone).
+* Faster workspace indicator animation in the bar.
 * New: **Oxide Remote for Windows** (`oxide-remote-host`): the phone app's stream, control, stats and actions with a
   Windows PC, DXGI capture and a newest-frame-only pipeline.
 * New: the phone app's **Remote tab**: a touchpad without a picture (acceleration, long-press drag, two-finger scroll,

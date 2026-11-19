@@ -249,6 +249,9 @@ fn session(mut c: TcpStream, sh: Shared, phone_id: String, nonce: String) -> std
                 ToPc::Text { text } => done(plat::text(&text))?,
                 ToPc::Action { name, arg } => done(plat::action(&name, arg.as_deref()))?,
                 ToPc::ClipboardGet => reply(ToPhone::Clipboard { text: arboard::Clipboard::new().and_then(|mut c| c.get_text()).unwrap_or_default() })?,
+                // the assistant lives on the Linux desktop
+                ToPc::Ask { .. } => done(Err("The assistant is only available on Oxide (Linux) PCs.".into()))?,
+                ToPc::AskConfirm { .. } | ToPc::AskCancel | ToPc::AskReset => {}
             }
         }
     })();

@@ -23,6 +23,10 @@ Singleton {
     property var configError: null
     property var whatsNew: null
     property bool superHeld: false
+    // performance profile in force ("eco" | "normal" | "performance"), what was chosen, and mains power
+    property string profile: "normal"
+    property string profileChoice: "normal"
+    property bool onAc: true
     // the screen new popups open on: the one the pointer / focus is on
     readonly property var activeScreen: {
         const o = outputs.find(o => o.focused);
@@ -75,6 +79,9 @@ Singleton {
                     root.configError = s.config_error || null;
                     root.whatsNew = s.whats_new || null;
                     root.superHeld = !!s.super_held;
+                    root.profile = s.profile || "normal";
+                    root.profileChoice = s.profile_choice || "normal";
+                    root.onAc = s.on_ac !== false;
                 } catch (e) {
                     console.log("oxide state: bad line", line);
                 }

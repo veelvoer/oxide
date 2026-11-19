@@ -19,6 +19,16 @@ brightness, control media, read and set the clipboard, take screenshots, use the
 pages and search the web, set reminders, and remember things you tell it (`~/.config/oxide/ai-memory.json`; the chat is `ai-chat.json`).
 The chat and its memory persist between sessions; the trash button in the panel clears the chat.
 
+## It knows Oxide
+
+The assistant carries a built-in handbook of the desktop (actions, config sections and keys, power profiles, `oxide-ctl`,
+recipes such as "save battery" or "lock when I close the lid"), so it goes straight to the right tool.
+
+## From your phone
+
+The Oxide Remote app has an Assistant tab: type what the PC should do. The PC's assistant works on the PC; answers
+appear word by word, and a confirmation (Permissions below) is asked on the phone. Not on Windows hosts.
+
 ## Permissions
 
 | Level | Behavior |

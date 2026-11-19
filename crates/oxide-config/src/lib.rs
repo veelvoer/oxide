@@ -43,6 +43,8 @@ pub struct Config {
     pub remote: RemoteCfg,
     /// Updates from the git repository (oxide-ctl update).
     pub update: UpdateCfg,
+    /// Performance profile, lid and idle behaviour.
+    pub power: PowerCfg,
     pub exec_once: Vec<String>,
     pub env: Vec<(String, String)>,
 }
@@ -376,6 +378,10 @@ pub enum Action {
     ToggleScratchpad(String),
     /// Zoom out to the overview of all workspaces (and back).
     ToggleOverview,
+    /// Performance profile: "eco", "normal" or "performance" (saved).
+    SetProfile(String),
+    /// Lock the screen now.
+    Lock,
     Quit,
 }
 
@@ -432,6 +438,56 @@ pub struct RemoteCfg {
 impl Default for RemoteCfg {
     fn default() -> Self {
         Self { enabled: false, anywhere: false, rendezvous: "https://ntfy.sh".into(), notes: true, phone_max_size: 1600, phone_bitrate: 12, phone_audio: false }
+    }
+}
+
+/// What happens when the lid closes, and when nobody touches the computer.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct PowerCfg {
+    /// "eco" (calm: no blur, no shadows, quick motion, power saver), "normal", or "performance" (everything on,
+    /// the system's performance profile).
+    pub profile: String,
+    /// Also switch the system's power profile (power-profiles-daemon: power-saver / balanced / performance).
+    pub system_profile: bool,
+    /// Switch to eco by itself on battery below this percentage (0 = never).
+    pub auto_eco_below: u32,
+    /// Lid closed on battery / on power: "system" (the system decides), "nothing", "lock", "suspend", "lock_suspend".
+    pub lid_battery: String,
+    pub lid_ac: String,
+    /// Closing the lid does nothing while an external screen is connected (a laptop used as a desktop).
+    pub lid_ignore_external: bool,
+    /// Wait this long (seconds) after the lid closed before acting, so a quick close and open does nothing.
+    pub lid_delay: u32,
+    /// Lock the screen when the lid opens again is never needed; but lock when the system goes to sleep for any reason.
+    pub lock_before_sleep: bool,
+    /// Lock after this many minutes without input (0 = never), on battery and on power.
+    pub idle_lock_battery: u32,
+    pub idle_lock_ac: u32,
+    /// Suspend after this many minutes without input (0 = never).
+    pub idle_suspend_battery: u32,
+    pub idle_suspend_ac: u32,
+    /// No idle lock or suspend while a window is fullscreen (video, presentations).
+    pub idle_inhibit_fullscreen: bool,
+}
+
+impl Default for PowerCfg {
+    fn default() -> Self {
+        Self {
+            profile: "normal".into(),
+            system_profile: true,
+            auto_eco_below: 0,
+            lid_battery: "lock_suspend".into(),
+            lid_ac: "lock".into(),
+            lid_ignore_external: true,
+            lid_delay: 0,
+            lock_before_sleep: true,
+            idle_lock_battery: 5,
+            idle_lock_ac: 10,
+            idle_suspend_battery: 15,
+            idle_suspend_ac: 0,
+            idle_inhibit_fullscreen: true,
+        }
     }
 }
 
@@ -708,6 +764,7 @@ impl Default for Config {
             scratchpads: vec![],
             remote: RemoteCfg::default(),
             update: UpdateCfg::default(),
+            power: PowerCfg::default(),
             exec_once: vec![],
             shell: ShellCfg::default(),
             theme: theme::ThemeCfg::default(),

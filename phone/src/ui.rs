@@ -35,6 +35,8 @@ pub mod ic {
     pub const CLIPBOARD: &str = "\u{E196}";
     pub const COPY: &str = "\u{E1CA}";
     pub const SEND: &str = "\u{E396}";
+    pub const SPARKLE: &str = "\u{E6A2}";
+    pub const STOP: &str = "\u{E46C}";
     pub const LOCK: &str = "\u{E2FA}";
     pub const MOON: &str = "\u{E330}";
     pub const RESTART: &str = "\u{E036}";

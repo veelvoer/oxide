@@ -175,7 +175,16 @@ pub struct Oxide {
     pub socket_name: String,
     pub dirty: bool,
 
+    /// The configuration in force: the user's, adjusted for the performance profile (see power.rs).
     pub config: Config,
+    /// The user's own configuration (what the file says).
+    pub user_config: Config,
+    pub profile_applied: String,
+    pub last_input: std::time::Instant,
+    pub lid_closed: bool,
+    pub lid_pending: Option<(std::time::Instant, String)>,
+    pub lid_inhibitor: Option<std::process::Child>,
+    pub idle_suspended_at: Option<std::time::Instant>,
     pub binds: Vec<CompiledBind>,
     /// Keys whose press triggered a bind; their release is not forwarded.
     pub suppressed: Vec<Keysym>,
@@ -406,6 +415,13 @@ impl Oxide {
             closing: vec![],
             anim_timer: false,
             config: Config::default(),
+            user_config: Config::default(),
+            profile_applied: String::new(),
+            last_input: std::time::Instant::now(),
+            lid_closed: false,
+            lid_pending: None,
+            lid_inhibitor: None,
+            idle_suspended_at: None,
             space: Space::default(),
             popups: PopupManager::default(),
             wins: vec![],
@@ -483,7 +499,9 @@ impl Oxide {
 
     /// Install a new config and apply everything that can change live.
     pub fn apply_config(&mut self, config: Config) {
-        self.config = config;
+        self.user_config = config;
+        self.apply_profile();
+        self.power_config_changed();
         self.sync_remote();
         crate::render::set_clear(&oxide_config::theme::palette(&self.config.theme).bg);
         oxide_config::defaults::apply_env(&self.config);
@@ -585,6 +603,7 @@ impl Oxide {
         self.telemetry_start();
         self.sync_remote();
         self.updates_start();
+        self.power_start();
         // theme files and app colors: helper tools are involved, so never on the compositor thread
         crate::render::set_clear(&oxide_config::theme::palette(&self.config.theme).bg);
         // kitty windows started from now on read the standard (or the user's own) configuration

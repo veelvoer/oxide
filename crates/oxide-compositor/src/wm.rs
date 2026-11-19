@@ -1031,6 +1031,8 @@ impl Oxide {
             Action::SendKey(combo) => self.send_key(combo),
             Action::ToggleScratchpad(name) => self.toggle_scratchpad(name),
             Action::ToggleOverview => self.toggle_overview(),
+            Action::SetProfile(p) => self.set_profile(p),
+            Action::Lock => self.lock_now(),
             Action::Quit => self.loop_signal.stop(),
         }
     }
@@ -1065,6 +1067,9 @@ impl Oxide {
             .collect();
         let (app_id, title) = focus.map(window_info).unwrap_or_default();
         State {
+            profile: self.profile_applied.clone(),
+            profile_choice: self.user_config.power.profile.clone(),
+            on_ac: crate::power::on_ac(),
             active_workspace: self.cur_ws(),
             workspaces,
             layout: match self.layout_of(self.cur_ws()) {

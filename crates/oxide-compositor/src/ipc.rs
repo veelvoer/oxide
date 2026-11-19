@@ -88,13 +88,13 @@ fn listen(handle: &LoopHandle<'static, Oxide>) {
 impl Oxide {
     fn handle_ipc(&mut self, req: Request) -> Response {
         match req {
-            Request::GetConfig => Response::Config { config: Box::new(self.config.clone()) },
+            Request::GetConfig => Response::Config { config: Box::new(self.user_config.clone()) },
             Request::SetConfig { config } => {
                 self.apply_config(*config);
                 Response::Ok
             }
             Request::SetRule { app_id, rule, clear } => {
-                let mut cfg = self.config.clone();
+                let mut cfg = self.user_config.clone();
                 let i = cfg.rules.iter().position(|r| r.title.is_none() && r.app_id.as_ref().is_some_and(|a| a.eq_ignore_ascii_case(&app_id)));
                 let i = i.unwrap_or_else(|| {
                     cfg.rules.push(oxide_config::WindowRule { app_id: Some(app_id.clone()), ..Default::default() });

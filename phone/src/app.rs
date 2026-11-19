@@ -30,6 +30,8 @@ enum Tab {
     Remote,
     Stats,
     Control,
+    /// talk to the PC's assistant
+    Assistant,
 }
 
 #[derive(PartialEq, Clone, Copy)]
@@ -76,6 +78,14 @@ struct Live {
     text: String,
     open: String,
     volume: f32,
+    /// the conversation with the PC's assistant: (mine, text)
+    chat: Vec<(bool, String)>,
+    ask: String,
+    ask_busy: bool,
+    /// the assistant wants a yes/no before doing something: (id, what, risky)
+    ask_confirm: Option<(u64, String, bool)>,
+    /// the tool the assistant is using now
+    ask_tool: String,
 }
 
 /// The newest app version on GitHub: (version, APK address).
@@ -342,6 +352,11 @@ impl App {
             text: String::new(),
             open: String::new(),
             volume: 0.5,
+            chat: Vec::new(),
+            ask: String::new(),
+            ask_busy: false,
+            ask_confirm: None,
+            ask_tool: String::new(),
         });
         self.page = Page::Pc(i);
         platform::keep_screen_on(true);
@@ -434,15 +449,16 @@ impl App {
             Page::Pc(i) => self.pc(ui, i),
         });
         if nav && kb <= 0.0 {
-            let items = [(ic::MONITOR, "Screen"), (ic::MOUSE, "Remote"), (ic::CHART, "Stats"), (ic::SLIDERS, "Control")];
+            let items = [(ic::MONITOR, "Screen"), (ic::MOUSE, "Remote"), (ic::CHART, "Stats"), (ic::SLIDERS, "Control"), (ic::SPARKLE, "Assistant")];
             let sel = match self.tab {
                 Tab::Screen => 0,
                 Tab::Remote => 1,
                 Tab::Stats => 2,
                 Tab::Control => 3,
+                Tab::Assistant => 4,
             };
             if let Some(n) = ui::nav_bar(ui, &items, sel, bottom) {
-                self.tab = [Tab::Screen, Tab::Remote, Tab::Stats, Tab::Control][n];
+                self.tab = [Tab::Screen, Tab::Remote, Tab::Stats, Tab::Control, Tab::Assistant][n];
             }
         }
         if self.page == Page::Home && !self.store.pcs.is_empty() {
@@ -623,6 +639,7 @@ impl App {
                     l.clipboard = text;
                     self.toast = Some(("Got the PC's clipboard".into(), Instant::now()));
                 }
+                Event::Msg(ToPhone::Assistant { json }) => assistant_event(l, &json),
                 Event::Msg(_) => {}
                 Event::Frame { seq, rgba, w, h, full, bytes } => {
                     let img = egui::ColorImage::from_rgba_unmultiplied([w, h], &rgba);
@@ -1215,6 +1232,7 @@ impl App {
             Tab::Remote => self.remote(ui),
             Tab::Stats => self.stats(ui),
             Tab::Control => self.control(ui),
+            Tab::Assistant => self.assistant(ui),
         }
     }
 
@@ -1704,6 +1722,79 @@ impl App {
         }
     }
 
+    /// Chat with the PC's assistant: it works on the PC; its answer arrives word by word.
+    fn assistant(&mut self, ui: &mut Ui) {
+        let p = pal();
+        let Some(l) = self.live.as_mut() else { return };
+        let mut out: Vec<ToPc> = Vec::new();
+        let bar_h = 62.0 + if l.ask_confirm.is_some() { 116.0 } else { 0.0 };
+        let width = ui.available_width();
+        egui::ScrollArea::vertical()
+            .auto_shrink([false, false])
+            .max_height((ui.available_height() - bar_h).max(80.0))
+            .stick_to_bottom(true)
+            .show(ui, |ui| {
+                if l.chat.is_empty() {
+                    ui::empty_state(ui, ic::SPARKLE, "Your PC's assistant", "Say what it should do: open an app, change a setting, find something. It works on the PC.", p.accent);
+                }
+                for (mine, text) in &l.chat {
+                    ui.add_space(6.0);
+                    let layout = if *mine { egui::Layout::right_to_left(egui::Align::TOP) } else { egui::Layout::left_to_right(egui::Align::TOP) };
+                    ui.with_layout(layout, |ui| {
+                        ui.set_max_width(width * 0.88);
+                        let (fill, ink) = if *mine { (p.container, p.on_container) } else { (p.card, p.text) };
+                        egui::Frame::new().fill(fill).corner_radius(r(18)).inner_margin(egui::Margin::symmetric(14, 10)).show(ui, |ui| {
+                            ui.add(egui::Label::new(RichText::new(if text.is_empty() { "…" } else { text }).size(15.0).color(ink)).wrap());
+                        });
+                    });
+                }
+                if l.ask_busy && !l.ask_tool.is_empty() {
+                    ui.add_space(6.0);
+                    ui.label(RichText::new(format!("{}…", l.ask_tool)).size(13.0).color(p.muted));
+                }
+                ui.add_space(6.0);
+            });
+        if let Some((id, what, risky)) = l.ask_confirm.clone() {
+            ui::card(ui, |ui| {
+                ui.label(RichText::new(if risky { "Allow this? It may be hard to undo." } else { "Allow this?" }).size(13.0).color(if risky { p.warn } else { p.muted }));
+                ui.add(egui::Label::new(RichText::new(what).size(15.0).color(p.text)).wrap());
+                ui.add_space(6.0);
+                ui.horizontal(|ui| {
+                    if tap(&ui::button(ui, Kind::Filled, Some(ic::CHECK), "Allow", 0.0)) {
+                        out.push(ToPc::AskConfirm { id, allow: true });
+                        l.ask_confirm = None;
+                    }
+                    if tap(&ui::button(ui, Kind::Tonal, Some(ic::CLOSE), "Deny", 0.0)) {
+                        out.push(ToPc::AskConfirm { id, allow: false });
+                        l.ask_confirm = None;
+                    }
+                });
+            });
+        }
+        ui.add_space(6.0);
+        ui.horizontal(|ui| {
+            let w = ui.available_width() - 56.0;
+            let resp = ui::field(ui, &mut l.ask, "Ask your PC…", w);
+            let enter = resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+            if l.ask_busy {
+                if tap(&ui::icon_button_sized(ui, ic::STOP, p.on_accent, Some(p.accent), 48.0, 22.0)) {
+                    out.push(ToPc::AskCancel);
+                }
+            } else if tap(&ui::icon_button_sized(ui, ic::SEND, p.on_accent, Some(p.accent), 48.0, 22.0)) || enter {
+                let text = l.ask.trim().to_string();
+                if !text.is_empty() {
+                    l.ask.clear();
+                    l.chat.push((true, text.clone()));
+                    l.ask_busy = true;
+                    out.push(ToPc::Ask { text });
+                }
+            }
+        });
+        for m in out {
+            self.send(m);
+        }
+    }
+
     fn stats(&mut self, ui: &mut Ui) {
         let p = pal();
         let Some(l) = &self.live else { return };
@@ -1995,5 +2086,48 @@ impl App {
         if let Some(c) = confirm {
             self.confirm = Some(Confirm::Power(c));
         }
+    }
+}
+
+/// One event from the PC's assistant (`oxide-ai`'s JSON line).
+fn assistant_event(l: &mut Live, json: &str) {
+    let Ok(v) = serde_json::from_str::<serde_json::Value>(json) else { return };
+    match v["type"].as_str() {
+        Some("restore") => {
+            l.chat = v["items"]
+                .as_array()
+                .map(|a| a.iter().filter_map(|i| Some((i["role"] == "user", i["text"].as_str()?.to_string()))).filter(|(_, t)| !t.trim().is_empty()).collect())
+                .unwrap_or_default();
+        }
+        Some("turn_start") => {
+            l.ask_busy = true;
+            l.ask_tool.clear();
+        }
+        Some("assistant_start") => l.chat.push((false, String::new())),
+        Some("text_delta") => {
+            if let Some(t) = v["text"].as_str() {
+                match l.chat.last_mut() {
+                    Some((false, s)) => s.push_str(t),
+                    _ => l.chat.push((false, t.to_string())),
+                }
+            }
+        }
+        Some("tool_start") => l.ask_tool = v["name"].as_str().unwrap_or("").replace('_', " "),
+        Some("confirm") => {
+            l.ask_confirm = Some((v["id"].as_u64().unwrap_or(0), v["summary"].as_str().unwrap_or("An action").to_string(), v["risk"].as_str().is_some_and(|r| r != "low" && !r.is_empty())));
+        }
+        Some("done") => {
+            l.ask_busy = false;
+            l.ask_tool.clear();
+            l.ask_confirm = None;
+            if l.chat.last().is_some_and(|(m, s)| !m && s.is_empty()) {
+                l.chat.pop();
+            }
+        }
+        Some("error") => {
+            l.ask_busy = false;
+            l.chat.push((false, v["message"].as_str().unwrap_or("Something went wrong.").to_string()));
+        }
+        _ => {}
     }
 }

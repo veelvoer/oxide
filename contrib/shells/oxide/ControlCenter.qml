@@ -158,6 +158,63 @@ Pop {
                 }
             }
 
+            // ---- performance: eco / normal / performance ----
+            Rectangle {
+                id: perf
+                width: parent.width
+                height: 64
+                radius: Theme.rBox
+                color: Theme.alpha(Theme.text, 0.05)
+                readonly property var items: [
+                    { id: "eco", icon: "leaf", label: "Eco", hint: "Longest battery" },
+                    { id: "normal", icon: "speedometer", label: "Normal", hint: "Balanced" },
+                    { id: "performance", icon: "rocket-launch-outline", label: "Performance", hint: "Full speed" }
+                ]
+                readonly property int cur: Math.max(0, items.findIndex(i => i.id === OxideState.profileChoice))
+                readonly property real cellW: (width - 8) / 3
+                // auto-eco on a low battery: the picked one stays marked, the one in force gets a dot
+                readonly property bool forced: OxideState.profile !== OxideState.profileChoice
+                Rectangle {
+                    y: 4; height: parent.height - 8; width: perf.cellW; radius: Theme.rBox - 2
+                    x: 4 + perf.cur * perf.cellW
+                    color: Theme.expressive ? Theme.container : Theme.accent
+                    Behavior on x { NumberAnimation { duration: 240 * Theme.motionScale; easing.type: Easing.OutBack; easing.overshoot: 0.8 } }
+                }
+                Row {
+                    x: 4; y: 4
+                    Repeater {
+                        model: perf.items
+                        delegate: Item {
+                            required property var modelData
+                            required property int index
+                            width: perf.cellW; height: perf.height - 8
+                            readonly property bool sel: index === perf.cur
+                            Column {
+                                anchors.centerIn: parent
+                                spacing: 1
+                                Row {
+                                    anchors.horizontalCenter: parent.horizontalCenter
+                                    spacing: 6
+                                    Icon { name: modelData.icon; size: 16; color: sel ? (Theme.expressive ? Theme.onContainer : Theme.onAccent) : Theme.muted; anchors.verticalCenter: parent.verticalCenter }
+                                    Txt { text: modelData.label; color: sel ? (Theme.expressive ? Theme.onContainer : Theme.onAccent) : Theme.text; font.pixelSize: 13; font.weight: Font.DemiBold; anchors.verticalCenter: parent.verticalCenter }
+                                }
+                                Txt {
+                                    anchors.horizontalCenter: parent.horizontalCenter
+                                    text: sel && perf.forced ? "Eco: battery low" : modelData.hint
+                                    color: sel ? Theme.alpha(Theme.expressive ? Theme.onContainer : Theme.onAccent, 0.75) : Theme.muted
+                                    font.pixelSize: 11
+                                }
+                            }
+                            MouseArea {
+                                anchors.fill: parent
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: OxideState.dispatch({ "type": "set_profile", "arg": modelData.id })
+                            }
+                        }
+                    }
+                }
+            }
+
             // ---- the opened tile: networks or devices to connect to ----
             Rectangle {
                 id: listBox

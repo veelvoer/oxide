@@ -39,6 +39,8 @@ Safety: before anything destructive or irreversible say what you will do; if the
 Memory: you learn from the user. Use what you know without mentioning it. Store lasting facts with `remember`.",
         name = if cfg.name.trim().is_empty() { "Oxide" } else { cfg.name.trim() }
     );
+    s.push_str("\n\n");
+    s.push_str(include_str!("handbook.md"));
     let facts = crate::memory::all();
     if !facts.is_empty() {
         s.push_str("\n\nKnown facts:\n");

@@ -134,7 +134,7 @@ fn pair(mut c: TcpStream, sh: Shared, phone_id: String, phone_name: String, epk:
 }
 
 /// Sends encrypted messages; shared by the request loop and the screen thread.
-struct Sender {
+pub struct Sender {
     stream: TcpStream,
     cipher: Cipher,
 }
@@ -144,7 +144,7 @@ impl Sender {
         let sealed = self.cipher.seal(body);
         write_frame(&mut self.stream, &sealed)
     }
-    fn json(&mut self, m: &ToPhone) -> std::io::Result<()> {
+    pub fn json(&mut self, m: &ToPhone) -> std::io::Result<()> {
         self.send(&json_body(m))
     }
 }
@@ -176,6 +176,7 @@ fn session(mut c: TcpStream, sh: Shared, phone_id: String, nonce: String) -> std
     let acked = Arc::new(AtomicU64::new(0));
     let mut screen_output: Option<String> = None;
     let mut watching = false;
+    let mut assistant = crate::assistant::Assistant::default();
     let result = (|| -> std::io::Result<()> {
         loop {
             let sealed = read_frame(&mut c)?;
@@ -255,10 +256,25 @@ fn session(mut c: TcpStream, sh: Shared, phone_id: String, nonce: String) -> std
                 ToPc::Text { text } => done(actions::input(InputCmd::Type { text }))?,
                 ToPc::Action { name, arg } => done(actions::action(&name, arg.as_deref()))?,
                 ToPc::ClipboardGet => reply(ToPhone::Clipboard { text: actions::clipboard() })?,
+                ToPc::Ask { text } => {
+                    if let Err(e) = assistant.send(&sender, serde_json::json!({"type": "user", "text": text})) {
+                        done(Err(e))?
+                    }
+                }
+                ToPc::AskConfirm { id, allow } => {
+                    let _ = assistant.send(&sender, serde_json::json!({"type": "confirm_reply", "id": id, "allow": allow}));
+                }
+                ToPc::AskCancel => {
+                    let _ = assistant.send(&sender, serde_json::json!({"type": "cancel"}));
+                }
+                ToPc::AskReset => {
+                    let _ = assistant.send(&sender, serde_json::json!({"type": "reset"}));
+                }
             }
         }
     })();
     streaming.store(false, Ordering::SeqCst);
+    assistant.stop();
     if watching {
         sh.sampler.watchers.fetch_sub(1, Ordering::Relaxed);
     }

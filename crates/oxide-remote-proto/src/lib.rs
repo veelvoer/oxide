@@ -81,6 +81,13 @@ pub enum ToPc {
     /// mute, workspace (arg number), run (arg command), open_url (arg url), notify (arg text), clipboard_set (arg text)
     Action { name: String, arg: Option<String> },
     ClipboardGet,
+    /// Say something to the PC's assistant (it works on the PC and answers with `ToPhone::Assistant` events).
+    Ask { text: String },
+    /// Answer to an assistant `confirm` event.
+    AskConfirm { id: u64, allow: bool },
+    AskCancel,
+    /// Forget the conversation.
+    AskReset,
 }
 
 /// Answers and events from the PC (encrypted).
@@ -94,6 +101,8 @@ pub enum ToPhone {
     Clipboard { text: String },
     /// Where the PC can be reached away from home (the phone keeps these for later).
     Whereabouts(Whereabouts),
+    /// One event of the assistant (`oxide-ai`'s JSON line as is: text_delta, tool_start, confirm, done, error, ...).
+    Assistant { json: String },
 }
 
 /// The PC's addresses on the internet and the ntfy server where it leaves an encrypted note when they change.
