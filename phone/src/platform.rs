@@ -65,6 +65,15 @@ mod imp {
         call(|env, a| env.call_method(a, "setShowOnPc", "(Z)Z", &[JValue::Bool(on as u8)])?.z()).unwrap_or(false)
     }
 
+    /// The watch connection: 0 off, 1 on, 2 waiting for the Bluetooth permission, 3 no Bluetooth.
+    pub fn watch_bridge(on: bool) -> i32 {
+        call(|env, a| env.call_method(a, "watchBridge", "(Z)I", &[JValue::Bool(on as u8)])?.i()).unwrap_or(0)
+    }
+
+    pub fn watch_bridge_state() -> i32 {
+        call(|env, a| env.call_method(a, "watchBridgeState", "()I", &[])?.i()).unwrap_or(0)
+    }
+
     pub fn device_name() -> Option<String> {
         call(|env, a| {
             let o = env.call_method(a, "deviceName", "()Ljava/lang/String;", &[])?.l()?;
@@ -167,6 +176,12 @@ mod imp {
     }
     pub fn set_show_on_pc(_: bool) -> bool {
         false
+    }
+    pub fn watch_bridge(on: bool) -> i32 {
+        i32::from(on)
+    }
+    pub fn watch_bridge_state() -> i32 {
+        1
     }
     pub fn dark() -> Option<bool> {
         std::env::var("OXIDE_REMOTE_LIGHT").ok().map(|_| false).or(Some(true))

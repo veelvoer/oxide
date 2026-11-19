@@ -20,7 +20,7 @@ mod imp {
         let _ = APP.set(app.clone());
     }
 
-    fn call<R>(f: impl FnOnce(&mut JNIEnv, &JObject) -> jni::errors::Result<R>) -> Option<R> {
+    pub fn call<R>(f: impl FnOnce(&mut JNIEnv, &JObject) -> jni::errors::Result<R>) -> Option<R> {
         let app = APP.get()?;
         let vm = unsafe { JavaVM::from_raw(app.vm_as_ptr() as *mut _) }.ok()?;
         let mut env = vm.attach_current_thread_permanently().ok()?;

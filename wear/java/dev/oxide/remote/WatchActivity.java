@@ -1,10 +1,19 @@
 package dev.oxide.remote;
 
+import android.bluetooth.BluetoothAdapter;
+import android.bluetooth.BluetoothDevice;
+import android.bluetooth.BluetoothManager;
+import android.bluetooth.BluetoothSocket;
 import android.content.Context;
+import android.content.pm.PackageManager;
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.util.UUID;
 import android.hardware.Sensor;
 import android.hardware.SensorEvent;
 import android.hardware.SensorEventListener;
 import android.hardware.SensorManager;
+import android.os.Build;
 import android.os.Bundle;
 
 /**
@@ -35,6 +44,81 @@ public class WatchActivity extends OxideActivity implements SensorEventListener 
     protected void onCreate(Bundle b) {
         super.onCreate(b);
         sm = (SensorManager) getSystemService(Context.SENSOR_SERVICE);
+        if (Build.VERSION.SDK_INT >= 31 && checkSelfPermission("android.permission.BLUETOOTH_CONNECT") != PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(new String[] { "android.permission.BLUETOOTH_CONNECT" }, 78);
+        }
+    }
+
+    // ---- the phone, over Bluetooth: the watch needs no Wi-Fi. The phone's Oxide Remote app listens on a service; the
+    // conversation is in Rust (link.rs), this holds the socket.
+    private static final String SERVICE_UUID = "5e0a6f1c-6b0d-4c0f-9d7c-0f3a4b2e9a11";
+    private volatile BluetoothSocket sock = null;
+    private volatile String btError = "";
+
+    public String btError() {
+        return btError;
+    }
+
+    /** 0 ready, 1 no permission, 2 Bluetooth is off, 3 no paired devices, 4 no Bluetooth */
+    public int btState() {
+        try {
+            if (Build.VERSION.SDK_INT >= 31 && checkSelfPermission("android.permission.BLUETOOTH_CONNECT") != PackageManager.PERMISSION_GRANTED) return 1;
+            BluetoothManager bm = (BluetoothManager) getSystemService(Context.BLUETOOTH_SERVICE);
+            BluetoothAdapter a = bm == null ? null : bm.getAdapter();
+            if (a == null) return 4;
+            if (!a.isEnabled()) return 2;
+            if (a.getBondedDevices().isEmpty()) return 3;
+            return 0;
+        } catch (SecurityException e) {
+            return 1;
+        }
+    }
+
+    /** Connect to the phone: the address that worked last time first, then the other paired devices. "" = not found. */
+    public synchronized String btConnect(String last) {
+        btClose();
+        if (btState() != 0) return "";
+        try {
+            BluetoothAdapter a = ((BluetoothManager) getSystemService(Context.BLUETOOTH_SERVICE)).getAdapter();
+            java.util.ArrayList<BluetoothDevice> list = new java.util.ArrayList<>();
+            for (BluetoothDevice d : a.getBondedDevices()) {
+                if (d.getAddress().equals(last)) list.add(0, d);
+                else list.add(d);
+            }
+            for (BluetoothDevice d : list) {
+                try {
+                    BluetoothSocket s = d.createRfcommSocketToServiceRecord(UUID.fromString(SERVICE_UUID));
+                    s.connect();
+                    sock = s;
+                    return d.getAddress();
+                } catch (Exception e) {
+                    btError = d.getName() + ": " + e.getMessage();
+                    android.util.Log.w("oxide-watch", "bluetooth connect failed: " + btError);
+                }
+            }
+        } catch (SecurityException e) {
+            btError = "no permission";
+        }
+        return "";
+    }
+
+    public InputStream btIn() throws java.io.IOException {
+        return sock.getInputStream();
+    }
+
+    public OutputStream btOut() throws java.io.IOException {
+        return sock.getOutputStream();
+    }
+
+    public synchronized void btClose() {
+        BluetoothSocket s = sock;
+        sock = null;
+        if (s != null) {
+            try {
+                s.close();
+            } catch (Exception ignored) {
+            }
+        }
     }
 
     /** Switch the sensors on or off. level: how hard a pinch must tap (lower = more sensitive). */

@@ -1,15 +1,14 @@
 //! Oxide Remote for Wear OS. The protocol, the PC list, the colors and the Android glue are the phone app's own files
 //! (one source of truth); this crate adds the watch's screens.
-#[path = "../../phone/src/net.rs"]
-pub mod net;
 #[path = "../../phone/src/platform.rs"]
 pub mod platform;
-#[path = "../../phone/src/store.rs"]
-pub mod store;
+#[path = "../../phone/src/jstream.rs"]
+pub mod jstream;
 #[path = "../../phone/src/theme.rs"]
 pub mod theme;
 
 pub mod app;
+pub mod link;
 pub mod motion;
 pub mod settings;
 

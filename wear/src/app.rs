@@ -1,21 +1,21 @@
 //! The watch app: a PC list, and per PC three pages side by side (touchpad or gyro mouse, controls, stats) that you swipe
 //! between. Made for a small round screen: big touch targets, little drawing, repaint only when something moves.
 use std::{
-    collections::HashMap,
     path::PathBuf,
     sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
 
 use egui::{vec2, Align2, Color32, Pos2, Rect, Sense, Stroke, Ui, UiBuilder, Vec2};
-use oxide_remote_proto::{Announce, PcInfo, Stats, ToPc, ToPhone};
+use oxide_remote_proto::{
+    watch::{WatchPc, WatchReq, WatchResp},
+    PcInfo, Stats, ToPc, ToPhone,
+};
 
 use crate::{
-    motion,
-    net::{self, Event, PairEvent, Route, Session},
-    platform,
+    link::{self, Link, LinkEvent},
+    motion, platform,
     settings::{Settings, ACCENTS},
-    store::Store,
     theme::*,
 };
 
@@ -45,13 +45,17 @@ mod ic {
     pub const SLIDERS: &str = "\u{E434}";
     pub const CHART: &str = "\u{E156}";
     pub const CARET: &str = "\u{E13A}";
+    pub const PHONE: &str = "\u{E1E0}";
     pub const MINUS: &str = "\u{E32A}";
 }
 
 #[derive(PartialEq, Clone, Copy)]
 enum Page {
     Home,
-    Add,
+    /// type the code the phone shows
+    Pair,
+    /// the link to the phone
+    Phone,
     Pc(usize),
     Settings,
     Theme,
@@ -59,17 +63,14 @@ enum Page {
     Updates,
 }
 
-/// An open PC.
+/// An open PC (the phone keeps the real connection).
 struct Live {
-    session: Session,
     connected: bool,
-    route: Option<Route>,
     error: Option<String>,
     stats: Option<Stats>,
     info: Option<PcInfo>,
     last_stats: Instant,
     volume: f32,
-    closed_at: Option<Instant>,
 }
 
 #[derive(Default)]
@@ -80,14 +81,12 @@ struct Update {
     error: Option<String>,
 }
 
-/// Pairing from the watch: choose a PC that answers on the network, then type the 6 digits it shows.
-struct Adding {
-    found: Option<Vec<(Announce, String)>>,
-    scanning: Option<std::sync::mpsc::Receiver<Vec<(Announce, String)>>>,
-    pairing: Option<(String, std::sync::mpsc::Receiver<PairEvent>, std::sync::mpsc::Sender<String>)>,
-    need_code: bool,
+/// Pairing with the phone: the 6 digits it shows.
+#[derive(Default)]
+struct Pairing {
     code: String,
     error: Option<String>,
+    waiting: bool,
 }
 
 /// A finger on the PC pages.
@@ -106,19 +105,25 @@ struct Touch {
 
 pub struct App {
     ctx: egui::Context,
-    store: Store,
     set: Settings,
+    token: Arc<Mutex<String>>,
+    link: Link,
+    /// the phone answered and knows this watch
+    phone: Option<String>,
+    /// what the link says while there is no phone
+    link_status: String,
+    /// the phone answered but wants the code first
+    need_pairing: bool,
+    pcs: Vec<WatchPc>,
+    last_list: Instant,
     page: Page,
     tab: usize,
     /// where the pager is shown (0 = pad, 1 = controls, 2 = stats), moving smoothly toward `tab`
     pager: f32,
     touch: Touch,
-    online: Arc<Mutex<HashMap<String, Option<Route>>>>,
-    new_hosts: Arc<Mutex<HashMap<String, String>>>,
-    last_probe: Instant,
     live: Option<Live>,
     update: Update,
-    adding: Adding,
+    pairing: Pairing,
     toast: Option<(String, Instant)>,
     pal: Option<Pal>,
     last_theme: Instant,
@@ -293,22 +298,28 @@ fn arc(ui: &Ui, center: Pos2, radius: f32, from: f32, to: f32, stroke: Stroke) {
 impl App {
     pub fn new(ctx: &egui::Context, dir: PathBuf) -> Self {
         fonts(ctx);
-        let store = Store::load(dir.clone());
         let set = Settings::load(dir);
+        let token = Arc::new(Mutex::new(set.token.clone()));
+        let name = platform::device_name().map(|n| format!("{n} (watch)")).unwrap_or_else(|| "Watch".into());
+        let wake_ctx = ctx.clone();
+        let link = link::start(name, token.clone(), set.phone_addr.clone(), move || wake_ctx.request_repaint());
         let mut a = Self {
             ctx: ctx.clone(),
-            store,
             set,
+            token,
+            link,
+            phone: None,
+            link_status: "Looking for your phone…".into(),
+            need_pairing: false,
+            pcs: vec![],
+            last_list: Instant::now() - Duration::from_secs(60),
             page: Page::Home,
             tab: 0,
             pager: 0.0,
             touch: Touch::default(),
-            online: Arc::default(),
-            new_hosts: Arc::default(),
-            last_probe: Instant::now() - Duration::from_secs(10),
             live: None,
             update: Update::default(),
-            adding: Adding { found: None, scanning: None, pairing: None, need_code: false, code: String::new(), error: None },
+            pairing: Pairing::default(),
             toast: None,
             pal: None,
             last_theme: Instant::now() - Duration::from_secs(10),
@@ -318,10 +329,6 @@ impl App {
             test_pinches: 0,
             gyro_ok: motion::has_gyro(),
         };
-        if a.store.phone_name == "Phone" {
-            a.store.phone_name = platform::device_name().map(|n| format!("{n} (watch)")).unwrap_or_else(|| "Watch".into());
-            a.store.save();
-        }
         if a.set.auto_update {
             a.check_update();
         }
@@ -337,7 +344,7 @@ impl App {
     fn palette(&self) -> Pal {
         let mut p = match self.set.theme.as_str() {
             "pc" => {
-                let pc = self.live.as_ref().and_then(|_| if let Page::Pc(i) = self.page { self.store.pcs.get(i) } else { None }).or_else(|| self.store.pcs.first());
+                let pc = if let Page::Pc(i) = self.page { self.pcs.get(i) } else { None }.or_else(|| self.pcs.first());
                 pc.and_then(|pc| Pal::from_pc(&pc.palette)).unwrap_or_else(|| Pal::oxide(true))
             }
             "custom" => {
@@ -384,30 +391,14 @@ impl App {
 
     // ------------------------------------------------------------ network
 
-    fn probe(&mut self) {
-        if self.last_probe.elapsed() < Duration::from_secs(8) || self.page != Page::Home {
-            return;
-        }
-        self.last_probe = Instant::now();
-        for pc in self.store.pcs.clone() {
-            let online = self.online.clone();
-            let new_hosts = self.new_hosts.clone();
-            let ctx = self.ctx.clone();
-            std::thread::spawn(move || {
-                let r = net::reachable(&pc);
-                if let Some((_, Some(h))) = &r {
-                    new_hosts.lock().unwrap().insert(pc.id.clone(), h.clone());
-                }
-                online.lock().unwrap().insert(pc.id.clone(), r.map(|(route, _)| route));
-                ctx.request_repaint();
-            });
-        }
+    fn ask(&self, r: WatchReq) {
+        let _ = self.link.tx.send(r);
     }
 
     fn open_pc(&mut self, i: usize) {
-        let ctx = self.ctx.clone();
-        let session = net::open(&self.store.pcs[i], &self.store.phone_id, move || ctx.request_repaint());
-        self.live = Some(Live { session, connected: false, route: None, error: None, stats: None, info: None, last_stats: Instant::now() - Duration::from_secs(5), volume: 0.5, closed_at: None });
+        let Some(pc) = self.pcs.get(i) else { return };
+        self.ask(WatchReq::Open { id: pc.id.clone() });
+        self.live = Some(Live { connected: false, error: None, stats: None, info: None, last_stats: Instant::now() - Duration::from_secs(5), volume: 0.5 });
         self.page = Page::Pc(i);
         self.tab = 0;
         self.pager = 0.0;
@@ -415,113 +406,55 @@ impl App {
     }
 
     fn wake(&mut self, i: usize) {
-        let pc = self.store.pcs[i].clone();
-        let mut ok = false;
-        for m in &pc.macs {
-            ok |= oxide_remote_proto::wake(m, pc.subnet_broadcast()).is_ok();
-        }
-        // through the other PCs that are on, for when the watch is not on the PC's network
-        let online = self.online.lock().unwrap().clone();
-        let helpers: Vec<_> = self.store.pcs.iter().filter(|p| p.id != pc.id && online.get(&p.id).is_some_and(|r| r.is_some())).cloned().collect();
-        for h in &helpers {
-            let msgs = pc.macs.iter().map(|m| ToPc::Action { name: "wake".into(), arg: Some(format!("{m} {}", pc.host)) }).collect();
-            let (h, id) = (h.clone(), self.store.phone_id.clone());
-            std::thread::spawn(move || {
-                let _ = net::one_shot(&h, &id, msgs);
-            });
-        }
+        let Some(pc) = self.pcs.get(i) else { return };
+        self.ask(WatchReq::Wake { id: pc.id.clone() });
         platform::haptic(1);
-        self.say(if ok || !helpers.is_empty() { format!("Waking {}", pc.name) } else { "Could not send the wake-up".to_string() });
-        self.last_probe = Instant::now() - Duration::from_secs(6);
+        self.last_list = Instant::now() - Duration::from_secs(6);
     }
 
     fn send(&self, m: ToPc) {
-        if let Some(l) = &self.live {
-            let _ = l.session.to_pc.send(m);
-        }
+        self.ask(WatchReq::Send { msg: m });
     }
 
     fn poll(&mut self, ctx: &egui::Context) {
-        let pc_idx = if let Page::Pc(i) = self.page { Some(i) } else { None };
-        let mut save = false;
-        let mut reopen = false;
-        if let Some(l) = self.live.as_mut() {
-            while let Ok(ev) = l.session.events.try_recv() {
-                match ev {
-                    Event::Connected { route, host, .. } => {
-                        if let (Some(h), Some(pc)) = (host, pc_idx.and_then(|i| self.store.pcs.get_mut(i))) {
-                            pc.host = h;
-                            save = true;
-                        }
-                        l.connected = true;
-                        l.route = Some(route);
-                        l.error = None;
-                        let _ = l.session.to_pc.send(ToPc::Info);
-                        let _ = l.session.to_pc.send(ToPc::Stats);
-                    }
-                    Event::Moved(w) | Event::Msg(ToPhone::Whereabouts(w)) => {
-                        if let Some(pc) = pc_idx.and_then(|i| self.store.pcs.get_mut(i)) {
-                            if pc.remote != w.addrs || pc.rendezvous != w.rendezvous || pc.lan != w.lan {
-                                pc.remote = w.addrs;
-                                pc.lan = w.lan;
-                                pc.rendezvous = w.rendezvous;
-                                save = true;
-                            }
-                        }
-                    }
-                    Event::Msg(ToPhone::Info(info)) => {
-                        if let Some(pc) = pc_idx.and_then(|i| self.store.pcs.get_mut(i)) {
-                            if !info.palette.is_empty() && pc.palette != info.palette {
-                                pc.palette = info.palette.clone();
-                                save = true;
-                            }
-                            if !info.macs.is_empty() && pc.macs != info.macs {
-                                pc.macs = info.macs.clone();
-                                save = true;
-                            }
-                        }
-                        l.info = Some(info);
-                    }
-                    Event::Msg(ToPhone::Stats(s)) => {
-                        if let Some(v) = s.volume {
-                            l.volume = v;
-                        }
-                        l.stats = Some(s);
-                    }
-                    Event::Msg(ToPhone::Done { ok, message }) => {
-                        if !ok || !message.is_empty() {
-                            self.toast = Some((if message.is_empty() { "Done".into() } else { message }, Instant::now()));
-                        }
-                    }
-                    Event::Msg(_) | Event::Frame { .. } => {}
-                    Event::Closed(e) => {
-                        l.error = Some(e);
-                        l.connected = false;
-                        l.closed_at = Some(Instant::now());
+        while let Ok(ev) = self.link.rx.try_recv() {
+            match ev {
+                LinkEvent::Status(s) => {
+                    self.link_status = s;
+                    self.phone = None;
+                }
+                LinkEvent::Up(addr) => {
+                    self.link_status = "Phone found".into();
+                    if self.set.phone_addr != addr {
+                        self.set.phone_addr = addr;
+                        self.set.save();
                     }
                 }
+                LinkEvent::Down => {
+                    self.phone = None;
+                    self.need_pairing = false;
+                    self.link_status = "Looking for your phone…".into();
+                    if let Some(l) = self.live.as_mut() {
+                        l.connected = false;
+                        l.error = Some("The phone is out of reach".into());
+                    }
+                }
+                LinkEvent::Resp(r) => self.on_resp(r),
             }
-            // a dropped connection (the watch's Wi-Fi sleeps) is opened again
-            if l.closed_at.is_some_and(|t| t.elapsed() > Duration::from_secs(2)) {
-                reopen = true;
-            }
-            // numbers once a second, only while they are shown
-            if l.connected && self.tab == 2 && l.last_stats.elapsed() > Duration::from_secs(1) {
+        }
+        // the PC list while it is shown (and its state: the phone looks which are on)
+        if self.phone.is_some() && self.page == Page::Home && self.last_list.elapsed() > Duration::from_secs(8) {
+            self.last_list = Instant::now();
+            self.ask(WatchReq::List);
+        }
+        // the numbers once a second, only while they are shown
+        let want_stats = self.tab == 2;
+        if let Some(l) = self.live.as_mut() {
+            if l.connected && want_stats && l.last_stats.elapsed() > Duration::from_secs(1) {
                 l.last_stats = Instant::now();
-                let _ = l.session.to_pc.send(ToPc::Stats);
+                let _ = self.link.tx.send(WatchReq::Send { msg: ToPc::Stats });
                 ctx.request_repaint_after(Duration::from_millis(1000));
             }
-        }
-        if reopen {
-            if let Some(i) = pc_idx {
-                let (tab, pager) = (self.tab, self.pager);
-                self.open_pc(i);
-                self.tab = tab;
-                self.pager = pager;
-            }
-        }
-        if save {
-            self.store.save();
         }
         // updates
         if let Some(rx) = &self.update.rx {
@@ -534,35 +467,89 @@ impl App {
                 self.update.rx = None;
             }
         }
-        // pairing
-        if let Some(rx) = &self.adding.scanning {
-            if let Ok(f) = rx.try_recv() {
-                self.adding.found = Some(f);
-                self.adding.scanning = None;
-            }
-        }
-        let mut done = None;
-        if let Some((_, rx, _)) = &self.adding.pairing {
-            while let Ok(ev) = rx.try_recv() {
-                match ev {
-                    PairEvent::NeedCode { .. } => self.adding.need_code = true,
-                    PairEvent::Done(r) => done = Some(r),
-                }
-            }
-        }
-        if let Some(r) = done {
-            self.adding.pairing = None;
-            self.adding.need_code = false;
-            self.adding.code.clear();
-            match r {
-                Ok(pc) => {
-                    let name = pc.name.clone();
-                    self.store.upsert(pc);
-                    self.say(format!("Paired with {name}"));
+    }
+
+    fn on_resp(&mut self, r: WatchResp) {
+        match r {
+            WatchResp::Welcome { phone } => {
+                self.phone = Some(phone);
+                self.need_pairing = false;
+                if self.page == Page::Pair {
                     self.page = Page::Home;
                 }
-                Err(e) => self.adding.error = Some(e),
+                self.last_list = Instant::now();
+                self.ask(WatchReq::List);
             }
+            WatchResp::NeedPairing => {
+                self.phone = None;
+                self.need_pairing = true;
+                self.link_status = "Pair this watch: on the phone open Oxide Remote > Settings > My watch".into();
+                // the token is no longer good (the phone forgot this watch)
+                if !self.set.token.is_empty() && self.page != Page::Pair {
+                    self.set.token.clear();
+                    *self.token.lock().unwrap() = String::new();
+                    self.set.save();
+                }
+            }
+            WatchResp::Paired { token } => {
+                self.set.token = token.clone();
+                *self.token.lock().unwrap() = token;
+                self.set.save();
+                self.pairing = Pairing::default();
+                self.say("Paired with your phone");
+            }
+            WatchResp::PairFailed { reason } => {
+                self.pairing.waiting = false;
+                self.pairing.code.clear();
+                self.say(reason);
+            }
+            WatchResp::Pcs { pcs } => {
+                // the palette of a PC comes with the list: remember it for the "PC" theme
+                self.pcs = pcs;
+                if self.set.theme == "pc" {
+                    self.last_theme = Instant::now() - Duration::from_secs(10);
+                }
+            }
+            WatchResp::Opened { .. } => {
+                if let Some(l) = self.live.as_mut() {
+                    l.connected = true;
+                    l.error = None;
+                    self.ask(WatchReq::Send { msg: ToPc::Info });
+                    self.ask(WatchReq::Send { msg: ToPc::Stats });
+                }
+            }
+            WatchResp::OpenFailed { error } => {
+                if let Some(l) = self.live.as_mut() {
+                    l.error = Some(error);
+                }
+            }
+            WatchResp::Closed { reason } => {
+                if let Some(l) = self.live.as_mut() {
+                    l.connected = false;
+                    l.error = Some(reason);
+                }
+            }
+            WatchResp::Msg { msg } => {
+                if let Some(l) = self.live.as_mut() {
+                    match msg {
+                        ToPhone::Info(info) => l.info = Some(info),
+                        ToPhone::Stats(s) => {
+                            if let Some(v) = s.volume {
+                                l.volume = v;
+                            }
+                            l.stats = Some(s);
+                        }
+                        ToPhone::Done { ok, message } => {
+                            if !ok || !message.is_empty() {
+                                self.toast = Some((if message.is_empty() { "Done".into() } else { message }, Instant::now()));
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            WatchResp::Toast { text } => self.say(text),
+            WatchResp::Pong => {}
         }
     }
 
@@ -581,25 +568,12 @@ impl App {
         self.update.error = None;
     }
 
-    fn scan(&mut self) {
-        let (tx, rx) = std::sync::mpsc::channel();
-        let ctx = self.ctx.clone();
-        std::thread::spawn(move || {
-            let _ = tx.send(net::discover(Duration::from_millis(2200)));
-            ctx.request_repaint();
-        });
-        self.adding.scanning = Some(rx);
-        self.adding.found = None;
-        self.adding.error = None;
-    }
-
     // ------------------------------------------------------------ frame
 
     pub fn frame(&mut self, ui: &mut Ui) {
         let ctx = ui.ctx().clone();
         self.refresh_theme();
         self.poll(&ctx);
-        self.probe();
         let p = pal();
         let full = ui.max_rect();
         ui.painter().rect_filled(full, 0, p.bg);
@@ -614,7 +588,8 @@ impl App {
         }
         match self.page {
             Page::Home => self.home(ui, inner),
-            Page::Add => self.add(ui, inner),
+            Page::Pair => self.pair_page(ui, inner),
+            Page::Phone => self.phone_page(ui, inner),
             Page::Pc(i) => self.pc(ui, full, i),
             Page::Settings => self.settings(ui, inner),
             Page::Theme => self.theme_page(ui, inner),
@@ -661,32 +636,36 @@ impl App {
 
     fn home(&mut self, ui: &mut Ui, inner: Rect) {
         let p = pal();
-        let online = self.online.lock().unwrap().clone();
-        if let Ok(mut h) = self.new_hosts.lock() {
-            for (id, host) in h.drain() {
-                if let Some(pc) = self.store.pcs.iter_mut().find(|p| p.id == id) {
-                    pc.host = host;
-                }
-            }
-        }
-        let pcs = self.store.pcs.clone();
+        let pcs = self.pcs.clone();
+        let linked = self.phone.is_some();
+        let status = self.link_status.clone();
+        let need_pairing = self.need_pairing;
         let mut open = None;
         let mut wake = None;
         let mut go = None;
         let update_ready = self.update.latest.is_some();
         self.column(ui, inner, |_, ui, w| {
             title(ui, w, "Your PCs");
-            if pcs.is_empty() {
-                let (rect, _) = ui.allocate_exact_size(vec2(w, 54.0), Sense::hover());
-                ui.painter().text(rect.center(), Align2::CENTER_CENTER, "No PC yet. Pair one\nfrom this watch.", FontId::proportional(12.0), p.muted);
+            if !linked {
+                // no phone yet: say why, and what to do
+                let (rect, _) = ui.allocate_exact_size(vec2(w, 74.0), Sense::hover());
+                ui.painter().rect_filled(rect, 26, p.card);
+                let galley = ui.painter().layout(status, medium(12.0), p.muted, rect.width() - 28.0);
+                let pos = Pos2::new(rect.center().x - galley.size().x / 2.0, rect.center().y - galley.size().y / 2.0);
+                ui.painter().galley(pos, galley, p.muted);
+                if need_pairing && button(ui, vec2(w, 38.0), Some(ic::PHONE), "Enter code", Look::Filled) {
+                    go = Some(Page::Pair);
+                }
+            } else if pcs.is_empty() {
+                let (rect, _) = ui.allocate_exact_size(vec2(w, 64.0), Sense::hover());
+                ui.painter().text(rect.center(), Align2::CENTER_CENTER, "No PC on your phone yet.\nAdd one in the phone app.", FontId::proportional(12.0), p.muted);
             }
-            for (i, pc) in pcs.iter().enumerate() {
-                let state = online.get(&pc.id).copied();
-                let (sub, dot) = match state {
-                    Some(Some(Route::Home)) => ("Online", p.good),
-                    Some(Some(Route::Away)) => ("Online · internet", p.good),
-                    Some(None) => ("Offline", p.muted),
-                    None => ("Looking…", p.muted),
+            for (i, pc) in pcs.iter().enumerate().filter(|_| linked) {
+                let (sub, dot) = match pc.state {
+                    1 => ("Online", p.good),
+                    2 => ("Online · internet", p.good),
+                    3 => ("Offline", p.muted),
+                    _ => ("Looking…", p.muted),
                 };
                 let (rect, resp) = ui.allocate_exact_size(vec2(w, 54.0), Sense::click());
                 let down = ui.ctx().animate_bool_with_time(resp.id.with("down"), resp.is_pointer_button_down_on(), 0.08);
@@ -701,23 +680,16 @@ impl App {
                 let wresp = ui.interact(wr, resp.id.with("wake"), Sense::click());
                 let wdown = wresp.is_pointer_button_down_on();
                 ui.painter().circle_filled(wr.center(), 17.0, mix(p.raised, p.text, if wdown { 0.14 } else { 0.0 }));
-                ui.painter().text(wr.center(), Align2::CENTER_CENTER, ic::POWER, icon_font(16.0, false), if state == Some(None) { p.accent } else { p.muted });
+                ui.painter().text(wr.center(), Align2::CENTER_CENTER, ic::POWER, icon_font(16.0, false), if pc.state == 3 { p.accent } else { p.muted });
                 if wresp.clicked() {
                     wake = Some(i);
                 } else if resp.clicked() {
                     open = Some(i);
                 }
             }
-            ui.horizontal(|ui| {
-                ui.spacing_mut().item_spacing.x = 6.0;
-                let bw = (w - 6.0) / 2.0;
-                if button(ui, vec2(bw, 38.0), Some(ic::PLUS), "Add", Look::Tonal) {
-                    go = Some(Page::Add);
-                }
-                if button(ui, vec2(bw, 38.0), Some(ic::GEAR), if update_ready { "Update" } else { "Setup" }, if update_ready { Look::Filled } else { Look::Tonal }) {
-                    go = Some(Page::Settings);
-                }
-            });
+            if button(ui, vec2(w, 38.0), Some(ic::GEAR), if update_ready { "Update" } else { "Setup" }, if update_ready { Look::Filled } else { Look::Tonal }) {
+                go = Some(Page::Settings);
+            }
         });
         if let Some(i) = open {
             self.open_pc(i);
@@ -726,123 +698,110 @@ impl App {
             self.wake(i);
         }
         if let Some(g) = go {
-            if g == Page::Add {
-                self.adding = Adding { found: None, scanning: None, pairing: None, need_code: false, code: String::new(), error: None };
-                self.scan();
-            }
             self.page = g;
         }
         ui.ctx().request_repaint_after(Duration::from_secs(2));
     }
 
-    // ------------------------------------------------------------ pairing
+    // ------------------------------------------------------------ pairing with the phone
 
-    fn add(&mut self, ui: &mut Ui, inner: Rect) {
+    fn pair_page(&mut self, ui: &mut Ui, inner: Rect) {
         let p = pal();
-        let mut pick: Option<(String, u16)> = None;
-        let mut rescan = false;
-        let mut leave = false;
         let mut digit = None;
         let mut backspace = false;
         let mut submit = false;
-        let need_code = self.adding.need_code;
-        let pairing = self.adding.pairing.as_ref().map(|(n, _, _)| n.clone());
-        let found = self.adding.found.clone();
-        let scanning = self.adding.scanning.is_some();
-        let error = self.adding.error.clone();
-        let code = self.adding.code.clone();
-        let paired: Vec<String> = self.store.pcs.iter().map(|p| p.id.clone()).collect();
-        self.column(ui, inner, |app, ui, w| {
-            app.back(ui, w, Page::Home, "Add a PC");
-            if need_code {
-                let (rect, _) = ui.allocate_exact_size(vec2(w, 40.0), Sense::hover());
-                ui.painter().text(Pos2::new(rect.center().x, rect.top() + 8.0), Align2::CENTER_CENTER, format!("Code on {}", pairing.clone().unwrap_or_default()), FontId::proportional(11.0), p.muted);
-                let shown: String = (0..6).map(|i| code.chars().nth(i).map(|c| c.to_string()).unwrap_or_else(|| "·".into())).collect::<Vec<_>>().join(" ");
-                ui.painter().text(Pos2::new(rect.center().x, rect.bottom() - 10.0), Align2::CENTER_CENTER, shown, semibold(20.0), p.text);
-                let cell = (w - 12.0) / 3.0;
-                for rowk in 0..4 {
-                    ui.horizontal(|ui| {
-                        ui.spacing_mut().item_spacing.x = 6.0;
-                        for col in 0..3 {
-                            let k = rowk * 3 + col;
-                            let (label, ic_): (String, Option<&str>) = match k {
-                                9 => (String::new(), Some(ic::BACKSPACE)),
-                                10 => ("0".into(), None),
-                                11 => (String::new(), Some(ic::CHECK)),
-                                n => ((n + 1).to_string(), None),
-                            };
-                            let look = if k == 11 { Look::Filled } else { Look::Tonal };
-                            if button(ui, vec2(cell, 34.0), ic_, &label, look) {
-                                match k {
-                                    9 => backspace = true,
-                                    11 => submit = true,
-                                    10 => digit = Some('0'),
-                                    n => digit = Some(char::from(b'1' + n as u8)),
-                                }
+        let mut leave = false;
+        let code = self.pairing.code.clone();
+        let waiting = self.pairing.waiting;
+        // the whole circle is used: a small keypad in the middle (the corners of the screen are cut off)
+        let cx = inner.center().x;
+        let code_y = inner.top() + 20.0;
+        ui.painter().text(Pos2::new(cx + 8.0, code_y), Align2::CENTER_CENTER, (0..6).map(|i| code.chars().nth(i).map(|c| c.to_string()).unwrap_or_else(|| "·".into())).collect::<Vec<_>>().join(" "), semibold(18.0), if waiting { p.muted } else { p.text });
+        let back = Rect::from_center_size(Pos2::new(cx - 66.0, code_y), vec2(30.0, 28.0));
+        let resp = ui.interact(back, ui.scope_id().with("pair-back"), Sense::click());
+        ui.painter().circle_filled(back.center(), 13.0, mix(p.raised, p.text, if resp.is_pointer_button_down_on() { 0.14 } else { 0.0 }));
+        ui.painter().text(back.center(), Align2::CENTER_CENTER, ic::BACK, icon_font(13.0, false), p.muted);
+        if resp.clicked() {
+            leave = true;
+        }
+        let area = Rect::from_min_size(Pos2::new(cx - 72.0, inner.top() + 38.0), vec2(144.0, 160.0));
+        ui.scope_builder(UiBuilder::new().max_rect(area), |ui| {
+            ui.spacing_mut().item_spacing = vec2(4.0, 4.0);
+            let cell = (144.0 - 8.0) / 3.0;
+            for rowk in 0..4 {
+                ui.horizontal(|ui| {
+                    for col in 0..3 {
+                        let k = rowk * 3 + col;
+                        let (label, ic_): (String, Option<&str>) = match k {
+                            9 => (String::new(), Some(ic::BACKSPACE)),
+                            10 => ("0".into(), None),
+                            11 => (String::new(), Some(ic::CHECK)),
+                            n => ((n + 1).to_string(), None),
+                        };
+                        let look = if k == 11 { Look::Filled } else { Look::Tonal };
+                        if button(ui, vec2(cell, 36.0), ic_, &label, look) && !waiting {
+                            match k {
+                                9 => backspace = true,
+                                11 => submit = true,
+                                10 => digit = Some('0'),
+                                n => digit = Some(char::from(b'1' + n as u8)),
                             }
                         }
-                    });
-                }
-            } else if let Some(name) = &pairing {
-                let (rect, _) = ui.allocate_exact_size(vec2(w, 60.0), Sense::hover());
-                ui.painter().text(rect.center(), Align2::CENTER_CENTER, format!("Connecting to\n{name}…"), medium(13.0), p.muted);
-            } else {
-                if scanning {
-                    let (rect, _) = ui.allocate_exact_size(vec2(w, 50.0), Sense::hover());
-                    ui.painter().text(rect.center(), Align2::CENTER_CENTER, "Looking for PCs…", medium(13.0), p.muted);
-                } else if let Some(f) = &found {
-                    let fresh: Vec<_> = f.iter().filter(|(a, _)| !paired.contains(&a.id)).collect();
-                    if fresh.is_empty() {
-                        let (rect, _) = ui.allocate_exact_size(vec2(w, 78.0), Sense::hover());
-                        ui.painter().text(
-                            rect.center(),
-                            Align2::CENTER_CENTER,
-                            "No PC found.\nOn the PC: Settings >\nPhone > Pair a phone",
-                            FontId::proportional(12.0),
-                            p.muted,
-                        );
                     }
-                    for (a, host) in fresh {
-                        if row(ui, w, ic::MONITOR, &a.name, host, true) {
-                            pick = Some((host.clone(), a.port));
-                        }
-                    }
-                }
-                if let Some(e) = &error {
-                    let (rect, _) = ui.allocate_exact_size(vec2(w, 40.0), Sense::hover());
-                    ui.painter().text(rect.center(), Align2::CENTER_CENTER, e, FontId::proportional(11.0), p.bad);
-                }
-                if !scanning && button(ui, vec2(w, 36.0), Some(ic::REFRESH), "Look again", Look::Tonal) {
-                    rescan = true;
-                }
+                });
             }
-            let _ = &mut leave;
         });
-        if let Some((host, port)) = pick {
-            let name = found.as_ref().and_then(|f| f.iter().find(|(_, h)| *h == host).map(|(a, _)| a.name.clone())).unwrap_or_default();
-            let (rx, tx) = net::pair(host, port, self.store.phone_id.clone(), self.store.phone_name.clone());
-            self.adding.pairing = Some((name, rx, tx));
-            self.adding.error = None;
+        if leave {
+            self.page = Page::Home;
         }
         if let Some(d) = digit {
-            if self.adding.code.len() < 6 {
-                self.adding.code.push(d);
+            if self.pairing.code.len() < 6 {
+                self.pairing.code.push(d);
             }
         }
         if backspace {
-            self.adding.code.pop();
+            self.pairing.code.pop();
         }
-        if submit && self.adding.code.len() == 6 {
-            if let Some((_, _, tx)) = &self.adding.pairing {
-                let _ = tx.send(self.adding.code.clone());
+        if submit && self.pairing.code.len() == 6 {
+            self.pairing.waiting = true;
+            let code = self.pairing.code.clone();
+            self.ask(WatchReq::Pair { code });
+        }
+    }
+
+    fn phone_page(&mut self, ui: &mut Ui, inner: Rect) {
+        let p = pal();
+        let linked = self.phone.clone();
+        let status = self.link_status.clone();
+        let paired = !self.set.token.is_empty();
+        let mut forget = false;
+        let mut pair = false;
+        self.column(ui, inner, |app, ui, w| {
+            app.back(ui, w, Page::Settings, "Phone");
+            let (rect, _) = ui.allocate_exact_size(vec2(w, 64.0), Sense::hover());
+            ui.painter().rect_filled(rect, 26, p.card);
+            ui.painter().circle_filled(Pos2::new(rect.left() + 20.0, rect.center().y), 5.0, if linked.is_some() { p.good } else { p.muted });
+            ui.painter().text(Pos2::new(rect.left() + 34.0, rect.center().y - 9.0), Align2::LEFT_CENTER, linked.clone().unwrap_or_else(|| "No phone".into()), medium(13.0), p.text);
+            ui.painter().text(Pos2::new(rect.left() + 34.0, rect.center().y + 9.0), Align2::LEFT_CENTER, if linked.is_some() { "Connected over Bluetooth".into() } else { status.chars().take(30).collect::<String>() }, FontId::proportional(10.5), p.muted);
+            if !paired && button(ui, vec2(w, 38.0), Some(ic::PHONE), "Pair with phone", Look::Filled) {
+                pair = true;
             }
-            self.adding.need_code = false;
+            if paired && button(ui, vec2(w, 38.0), None, "Forget this phone", Look::Tonal) {
+                forget = true;
+            }
+            let (rect, _) = ui.allocate_exact_size(vec2(w, 44.0), Sense::hover());
+            ui.painter().text(rect.center(), Align2::CENTER_CENTER, "The watch talks to your PCs\nthrough the phone: no Wi-Fi needed", FontId::proportional(10.5), p.muted);
+        });
+        if pair {
+            self.page = Page::Pair;
         }
-        if rescan {
-            self.scan();
-        }
-        if scanning || pairing.is_some() {
-            ui.ctx().request_repaint_after(Duration::from_millis(200));
+        if forget {
+            self.set.token.clear();
+            *self.token.lock().unwrap() = String::new();
+            self.set.save();
+            self.phone = None;
+            self.need_pairing = true;
+            self.ask(WatchReq::Hello { name: "Watch".into(), token: String::new() });
         }
     }
 
@@ -953,7 +912,7 @@ impl App {
         }
         // ---- the top: which PC, and the way back
         let status = match &self.live {
-            Some(l) if l.connected => (self.store.pcs.get(i).map(|p| p.name.clone()).unwrap_or_default(), p.good),
+            Some(l) if l.connected => (self.pcs.get(i).map(|p| p.name.clone()).unwrap_or_default(), p.good),
             Some(l) if l.error.is_some() => ("Reconnecting…".to_string(), p.warn),
             _ => ("Connecting…".to_string(), p.muted),
         };
@@ -974,9 +933,10 @@ impl App {
     }
 
     fn leave_pc(&mut self) {
+        self.ask(WatchReq::Close);
         self.live = None;
         self.page = Page::Home;
-        self.last_probe = Instant::now() - Duration::from_secs(10);
+        self.last_list = Instant::now() - Duration::from_secs(10);
         self.last_theme = Instant::now() - Duration::from_secs(10);
     }
 
@@ -1083,9 +1043,13 @@ impl App {
         // the rotary bezel (or two-finger scroll) sets the volume
         let scroll = ctx.input(|i| i.smooth_scroll_delta.y);
         if scroll.abs() > 0.5 {
+            let mut set = None;
             if let Some(l) = self.live.as_mut() {
                 l.volume = (l.volume + scroll * 0.0025).clamp(0.0, 1.0);
-                let _ = l.session.to_pc.send(ToPc::Action { name: "volume".into(), arg: Some(format!("{:.0}", l.volume * 100.0)) });
+                set = Some(format!("{:.0}", l.volume * 100.0));
+            }
+            if let Some(v) = set {
+                self.send(ToPc::Action { name: "volume".into(), arg: Some(v) });
             }
         }
         let vol = self.live.as_ref().map_or(0.0, |l| l.volume);
@@ -1180,10 +1144,14 @@ impl App {
             "custom" => "Your color",
             _ => "Watch",
         };
+        let phone_sub = self.phone.clone().unwrap_or_else(|| "Not connected".into());
         let cursor = if self.set.cursor == "gyro" { "Gyro mouse" } else { "Touchpad" };
         let upd = if let Some((v, _)) = &self.update.latest { format!("{v} available") } else { format!("Version {VERSION}") };
         self.column(ui, inner, |app, ui, w| {
             app.back(ui, w, Page::Home, "Settings");
+            if row(ui, w, ic::PHONE, "Phone", &phone_sub, true) {
+                go = Some(Page::Phone);
+            }
             if row(ui, w, ic::SLIDERS, "Theme", theme, true) {
                 go = Some(Page::Theme);
             }

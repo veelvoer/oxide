@@ -62,6 +62,11 @@ and it switches itself off on another network (the app switches it back on when 
 
 `[remote] phone_max_size` (1600), `phone_bitrate` (12, Mbit/s), `phone_audio` (false: the phone's sound stays on the phone).
 
+## My watch
+
+Settings > My watch > *Let my watch connect*: the Wear OS app (docs/WEAR.md) then uses this phone as its connection to
+your PCs, over Bluetooth, so the watch needs no Wi-Fi. *Pair a watch* shows a 6-digit code for the watch.
+
 ## Assistant
 
 The Assistant tab talks to the PC's assistant (see ASSISTANT.md): "open Firefox", "lock the screen", "save battery".

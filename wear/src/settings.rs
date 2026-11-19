@@ -22,6 +22,10 @@ pub struct Settings {
     pub pinch_level: f32,
     /// look for updates by itself
     pub auto_update: bool,
+    /// what the phone gave this watch when it was paired
+    pub token: String,
+    /// the phone's Bluetooth address, to look there first
+    pub phone_addr: String,
     #[serde(skip)]
     pub dir: PathBuf,
 }
@@ -39,7 +43,7 @@ pub const ACCENTS: [(&str, u32); 8] = [
 
 impl Default for Settings {
     fn default() -> Self {
-        Self { theme: "watch".into(), accent: 0, cursor: "pad".into(), speed: 1.0, invert_x: false, invert_y: false, pinch: true, pinch_level: 1.6, auto_update: true, dir: PathBuf::new() }
+        Self { theme: "watch".into(), accent: 0, cursor: "pad".into(), speed: 1.0, invert_x: false, invert_y: false, pinch: true, pinch_level: 1.6, auto_update: true, token: String::new(), phone_addr: String::new(), dir: PathBuf::new() }
     }
 }
 

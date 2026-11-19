@@ -1134,6 +1134,41 @@ impl App {
                     }
                 }
             });
+            ui::section(ui, "My watch");
+            ui::card(ui, |ui| {
+                let state = platform::watch_bridge_state();
+                ui.label(RichText::new("Let my watch connect").font(medium(16.0)).color(p.text));
+                ui.add(egui::Label::new(RichText::new(match state {
+                    1 => "On: the watch reaches your PCs through this phone over Bluetooth, so it needs no Wi-Fi.",
+                    2 => "Allow Bluetooth for this app when Android asks.",
+                    3 => "This phone has no Bluetooth.",
+                    _ => "The watch uses this phone's connection over Bluetooth, which saves the watch's battery.",
+                }).size(13.5).color(p.muted)).wrap());
+                ui.add_space(6.0);
+                let mut sel = if state == 0 { 0 } else { 1 };
+                if ui::segmented(ui, &[(ic::CLOSE, "Off"), (ic::MONITOR, "On")], &mut sel) {
+                    platform::watch_bridge(sel == 1);
+                }
+                if state == 1 {
+                    ui.add_space(8.0);
+                    if let Some((code, left)) = crate::bridge::pairing_code() {
+                        ui.label(RichText::new("Type this code on the watch").size(13.5).color(p.muted));
+                        ui.label(RichText::new(format!("{} {}", &code[..3], &code[3..])).font(semibold(32.0)).color(p.accent));
+                        ui.label(RichText::new(format!("valid for {left} s")).size(12.5).color(p.muted));
+                        ui.ctx().request_repaint_after(Duration::from_millis(500));
+                    } else if tap(&ui::button(ui, Kind::Tonal, Some(ic::WATCH), "Pair a watch", 0.0)) {
+                        crate::bridge::start_pairing();
+                    }
+                    for w in crate::bridge::watches(&self.store.dir) {
+                        ui.add_space(4.0);
+                        ui::row(ui, ic::WATCH, &w.name, "Paired", |ui| {
+                            if tap(&ui::icon_button(ui, ic::TRASH, p.bad, None)) {
+                                crate::bridge::forget_watch(&self.store.dir, &w.token);
+                            }
+                        });
+                    }
+                }
+            });
             ui::section(ui, "Updates");
             ui::card(ui, |ui| {
                 let (state, prog) = platform::update_status();

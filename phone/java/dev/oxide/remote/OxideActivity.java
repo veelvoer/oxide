@@ -83,6 +83,7 @@ public class OxideActivity extends NativeActivity {
         });
         lightBars(!isDark());
         handleInstallIntent(getIntent());
+        if (getSharedPreferences("bridge", MODE_PRIVATE).getBoolean("on", false)) applyBridge();
     }
 
     @Override
@@ -300,6 +301,55 @@ public class OxideActivity extends NativeActivity {
                 updateState = 3;
             }
         }).start();
+    }
+
+    /**
+     * The watch connection: 0 off, 1 on, 2 waiting for the Bluetooth permission (the system asks), 3 no Bluetooth.
+     * With `enable` null-less: call watchBridge(true/false) to switch, watchBridgeState() to look.
+     */
+    public int watchBridge(boolean enable) {
+        android.content.SharedPreferences p = getSharedPreferences("bridge", MODE_PRIVATE);
+        p.edit().putBoolean("on", enable).apply();
+        return applyBridge();
+    }
+
+    public int watchBridgeState() {
+        boolean on = getSharedPreferences("bridge", MODE_PRIVATE).getBoolean("on", false);
+        if (!on) return 0;
+        if (android.bluetooth.BluetoothAdapter.getDefaultAdapter() == null) return 3;
+        if (Build.VERSION.SDK_INT >= 31 && checkSelfPermission("android.permission.BLUETOOTH_CONNECT") != android.content.pm.PackageManager.PERMISSION_GRANTED) return 2;
+        return 1;
+    }
+
+    private int applyBridge() {
+        boolean on = getSharedPreferences("bridge", MODE_PRIVATE).getBoolean("on", false);
+        Intent svc = new Intent(this, BridgeService.class);
+        if (!on) {
+            stopService(svc);
+            return 0;
+        }
+        if (android.bluetooth.BluetoothAdapter.getDefaultAdapter() == null) return 3;
+        java.util.ArrayList<String> need = new java.util.ArrayList<>();
+        if (Build.VERSION.SDK_INT >= 31 && checkSelfPermission("android.permission.BLUETOOTH_CONNECT") != android.content.pm.PackageManager.PERMISSION_GRANTED) need.add("android.permission.BLUETOOTH_CONNECT");
+        if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission("android.permission.POST_NOTIFICATIONS") != android.content.pm.PackageManager.PERMISSION_GRANTED) need.add("android.permission.POST_NOTIFICATIONS");
+        if (!need.isEmpty()) {
+            final String[] perms = need.toArray(new String[0]);
+            runOnUiThread(() -> requestPermissions(perms, 77));
+        }
+        if (need.contains("android.permission.BLUETOOTH_CONNECT")) return 2;
+        try {
+            if (Build.VERSION.SDK_INT >= 26) startForegroundService(svc);
+            else startService(svc);
+        } catch (Exception e) {
+            return 2;
+        }
+        return 1;
+    }
+
+    @Override
+    public void onRequestPermissionsResult(int code, String[] perms, int[] results) {
+        super.onRequestPermissionsResult(code, perms, results);
+        if (code == 77) applyBridge();
     }
 
     private void handleInstallIntent(Intent intent) {

@@ -10,6 +10,8 @@
 //!   long-term key. Every later frame is encrypted and authenticated; a wrong key fails at the first frame.
 //! * **Framing**: `u32 length (big endian)`, then the (encrypted) body. A body starts with a kind byte:
 //!   [`KIND_JSON`] (a [`ToPc`] / [`ToPhone`] message) or [`KIND_FRAME`] (a JPEG screen frame with a small header).
+pub mod watch;
+
 use std::io::{Read, Write};
 
 use chacha20poly1305::{aead::Aead, ChaCha20Poly1305, KeyInit, Nonce};

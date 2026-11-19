@@ -2,6 +2,9 @@
 
 ## 0.2.0 (unreleased)
 
+* New: the **watch works without Wi-Fi**: it talks to the phone over Bluetooth and the phone passes everything to the PCs
+  (phone app: Settings > My watch). The watch is paired with the phone by a 6-digit code and shows the phone's PCs.
+
 * New: **Oxide Remote for Wear OS** (`wear/`, docs/WEAR.md): PC list with wake-up, touchpad or gyro mouse (pinch to
   click), controls and stats as swipeable pages, theme (watch, color, PC), updates.
 * Fixed: X11 menus and dropdowns (Unity and others) keep the arrow cursor, and X11 popup windows appear at their own
