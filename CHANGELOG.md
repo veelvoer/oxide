@@ -2,6 +2,10 @@
 
 ## 0.2.0 (unreleased)
 
+* Watch: the gyro mouse points like a finger and thumb at the screen and follows your hand, a pinch clicks, and it keeps
+  working with the screen off while the app is open (foreground service; ends when the PC is left or the app closed).
+* Watch: icons are aligned for the eye (each icon centered by its ink and mass, measured; `scripts/gen_icon_metrics.py`).
+
 * New: natural scrolling is set apart for the **touchpad and the mouse** (`mouse_natural_scroll`).
 * New: **swipe between workspaces** with a set number of fingers on the touchpad (2, 3 or 4; Settings > Input).
 * New: the bar's workspace highlight has a **delay and a move time** (Settings > Bar > Workspaces).

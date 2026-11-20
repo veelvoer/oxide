@@ -42,6 +42,13 @@ pub fn arc(ui: &Ui, center: Pos2, radius: f32, from: f32, to: f32, stroke: Strok
     ui.painter().add(egui::Shape::line(pts, stroke));
 }
 
+/// An icon whose ink (not its box) is centered on `center`: each glyph has its own optical offset (see icon_metrics.rs).
+pub fn icon(ui: &Ui, center: Pos2, glyph: &str, size: f32, color: Color32) {
+    let cp = glyph.chars().next().map_or(0, |c| c as u32);
+    let (ox, oy) = crate::icon_metrics::ICON_OFFSETS.iter().find(|(c, _, _)| *c == cp).map_or((0.0, 0.0), |(_, x, y)| (*x, *y));
+    ui.painter().text(center - vec2(ox, oy) * size, Align2::CENTER_CENTER, glyph, icon_font(size, false), color);
+}
+
 pub fn smooth(t: f32) -> f32 {
     let t = t.clamp(0.0, 1.0);
     t * t * (3.0 - 2.0 * t)
@@ -289,7 +296,7 @@ fn draw_cell(ui: &Ui, cell: &Cell, rect: Rect, alpha: f32, pressed: bool, p: Pal
         }
         Cell::Row { icon, title, sub, caret } => {
             ui.painter().rect_filled(r, pill, card);
-            ui.painter().text(Pos2::new(r.left() + 22.0, r.center().y), Align2::CENTER_CENTER, icon, icon_font(18.0, false), accent);
+            self::icon(ui, Pos2::new(r.left() + 22.0, r.center().y), icon, 18.0, accent);
             let ty = if sub.is_empty() { r.center().y } else { r.center().y - 8.0 };
             let max_w = r.width() - 44.0 - if *caret { 36.0 } else { 14.0 };
             fit_text(ui, Pos2::new(r.left() + 42.0, ty), Align2::LEFT_CENTER, title, medium(13.0), ink, max_w);
@@ -297,7 +304,7 @@ fn draw_cell(ui: &Ui, cell: &Cell, rect: Rect, alpha: f32, pressed: bool, p: Pal
                 fit_text(ui, Pos2::new(r.left() + 42.0, r.center().y + 9.0), Align2::LEFT_CENTER, sub, FontId::proportional(10.5), muted, max_w);
             }
             if *caret {
-                ui.painter().text(Pos2::new(r.right() - 16.0, r.center().y), Align2::CENTER_CENTER, "\u{E13A}", icon_font(14.0, false), muted);
+                self::icon(ui, Pos2::new(r.right() - 16.0, r.center().y), "\u{E13A}", 14.0, muted);
             }
         }
         Cell::Toggle { title, on } => {
@@ -315,7 +322,7 @@ fn draw_cell(ui: &Ui, cell: &Cell, rect: Rect, alpha: f32, pressed: bool, p: Pal
             for (dx, g) in [(-1.0, "\u{E32A}"), (1.0, "\u{E3D4}")] {
                 let c = Pos2::new(r.center().x + dx * (r.width() / 2.0 - 30.0), r.bottom() - 18.0);
                 ui.painter().circle_filled(c, 14.0, a(p.raised, alpha));
-                ui.painter().text(c, Align2::CENTER_CENTER, g, icon_font(14.0, false), ink);
+                self::icon(ui, c, g, 14.0, ink);
             }
         }
         Cell::Choice { options, selected } => {
@@ -335,8 +342,12 @@ fn draw_cell(ui: &Ui, cell: &Cell, rect: Rect, alpha: f32, pressed: bool, p: Pal
             ui.painter().rect_filled(r, pill, fill);
             match icon {
                 Some(g) => {
-                    ui.painter().text(Pos2::new(r.center().x - 4.0 - text.chars().count() as f32 * 3.4, r.center().y), Align2::CENTER_CENTER, g, icon_font(16.0, false), fg);
-                    ui.painter().text(Pos2::new(r.center().x + 10.0, r.center().y), Align2::CENTER_CENTER, text, medium(13.0), fg);
+                    // icon and text as one group, centered together
+                    let tw = ui.painter().layout_no_wrap(text.clone(), medium(13.0), fg).size().x;
+                    let (iw, gap) = (16.0, 8.0);
+                    let left = r.center().x - (iw + gap + tw) / 2.0;
+                    self::icon(ui, Pos2::new(left + iw / 2.0, r.center().y), g, 16.0, fg);
+                    ui.painter().text(Pos2::new(left + iw + gap, r.center().y), Align2::LEFT_CENTER, text, medium(13.0), fg);
                 }
                 None => {
                     ui.painter().text(r.center(), Align2::CENTER_CENTER, text, medium(13.0), fg);
@@ -355,7 +366,7 @@ fn draw_cell(ui: &Ui, cell: &Cell, rect: Rect, alpha: f32, pressed: bool, p: Pal
         }
         Cell::Pc { name, sub, dot, wake_accent } => {
             ui.painter().rect_filled(r, pill, card);
-            ui.painter().text(Pos2::new(r.left() + 24.0, r.center().y), Align2::CENTER_CENTER, "\u{E32E}", icon_font(20.0, false), accent);
+            self::icon(ui, Pos2::new(r.left() + 24.0, r.center().y), "\u{E32E}", 20.0, accent);
             ui.painter().circle_filled(Pos2::new(r.left() + 35.0, r.center().y + 9.0), 4.0, a(*dot, alpha));
             // a narrow cell (near the rim) has no room for the wake button
             let wide = r.width() > radius * 1.5;
@@ -365,12 +376,12 @@ fn draw_cell(ui: &Ui, cell: &Cell, rect: Rect, alpha: f32, pressed: bool, p: Pal
             if wide {
                 let wc = Pos2::new(r.right() - 26.0, r.center().y);
                 ui.painter().circle_filled(wc, 18.0, a(p.raised, alpha));
-                ui.painter().text(wc, Align2::CENTER_CENTER, "\u{E3DA}", icon_font(16.0, false), if *wake_accent { accent } else { muted });
+                self::icon(ui, wc, "\u{E3DA}", 16.0, if *wake_accent { accent } else { muted });
             }
         }
         Cell::Back => {
             ui.painter().rect_filled(Rect::from_center_size(rect.center(), vec2(64.0, r.height())), pill, card);
-            ui.painter().text(rect.center(), Align2::CENTER_CENTER, "\u{E058}", icon_font(16.0, false), muted);
+            self::icon(ui, rect.center(), "\u{E058}", 16.0, muted);
         }
         Cell::Spacer(_) => {}
     }
@@ -387,7 +398,7 @@ pub fn round_button(ui: &mut Ui, id: impl std::hash::Hash + std::fmt::Debug, cen
     let rr = radius - down * 2.0;
     let (fill, fg) = if accent { (p.accent, p.on_accent) } else { (mix(p.card, p.text, 0.04 + down * 0.1), p.accent) };
     ui.painter().circle_filled(center, rr, mix(fill, p.text, if accent { down * 0.12 } else { 0.0 }));
-    ui.painter().text(center, Align2::CENTER_CENTER, icon, icon_font(rr * 0.9, false), fg);
+    self::icon(ui, center, icon, rr * 0.9, fg);
     resp.clicked()
 }
 

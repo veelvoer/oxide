@@ -35,6 +35,8 @@ public class WatchActivity extends OxideActivity implements SensorEventListener 
 
     // pinch: a short sharp tap on the accelerometer while the wrist is steady. Taps that follow each other within
     // 350 ms count together (1 = click, 3 = right click).
+    private volatile boolean keepAlive = false;
+    private long spikeAt = 0;
     private boolean absolute = false;
     private float armSign = 1f;
     private float armYaw = 0, armPitch = 0;
@@ -170,7 +172,8 @@ public class WatchActivity extends OxideActivity implements SensorEventListener 
             ready = spikes;
             spikes = 0;
         }
-        float[] r = { yaw, pitch, ready, armYaw, armPitch, armOk ? 1f : 0f };
+        long ago = spikeAt == 0 ? -1 : (now - spikeAt) / 1_000_000L;
+        float[] r = { yaw, pitch, ready, armYaw, armPitch, armOk ? 1f : 0f, ago >= 0 && ago < 2000 ? (float) ago : -1f };
         yaw = pitch = 0;
         ready = 0;
         return r;
@@ -203,8 +206,9 @@ public class WatchActivity extends OxideActivity implements SensorEventListener 
                 float jerk = (float) Math.sqrt(dx * dx + dy * dy + dz * dz);
                 long now = e.timestamp;
                 // a pinch is sharp but the wrist is not moving much
-                if (jerk > pinchLevel && gyroMag < 1.2f && (now - lastSpike) > 90_000_000L) {
+                if (jerk > pinchLevel && gyroMag < (absolute ? 2.4f : 1.2f) && (now - lastSpike) > 90_000_000L) {
                     lastSpike = now;
+                    spikeAt = now;
                     spikes++;
                 }
             }
@@ -216,9 +220,43 @@ public class WatchActivity extends OxideActivity implements SensorEventListener 
     @Override
     public void onAccuracyChanged(Sensor s, int accuracy) {}
 
+    /** While the pointer is used the screen may turn off: a foreground service keeps the process and the sensors going. */
+    public void keepAlive(boolean enable) {
+        keepAlive = enable;
+        android.content.Intent svc = new android.content.Intent(this, GyroService.class);
+        try {
+            if (enable) {
+                if (Build.VERSION.SDK_INT >= 26) startForegroundService(svc);
+                else startService(svc);
+            } else {
+                stopService(svc);
+            }
+        } catch (Exception e) {
+            android.util.Log.w("oxide-watch", "gyro service: " + e);
+        }
+    }
+
+    public boolean motionActive() {
+        return on;
+    }
+
     @Override
     protected void onPause() {
-        if (on) motion(false, pinchOn, pinchLevel, absolute, armSign);
+        // with the service the sensors stay on while the screen is off; without it they stop
+        if (on && !keepAlive) motion(false, pinchOn, pinchLevel, absolute, armSign);
         super.onPause();
+    }
+
+    @Override
+    protected void onDestroy() {
+        // the app is closed: nothing keeps running
+        keepAlive = false;
+        if (on) motion(false, pinchOn, pinchLevel, absolute, armSign);
+        try {
+            stopService(new android.content.Intent(this, GyroService.class));
+        } catch (Exception ignored) {
+        }
+        btClose();
+        super.onDestroy();
     }
 }

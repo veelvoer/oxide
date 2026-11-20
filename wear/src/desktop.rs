@@ -11,6 +11,10 @@ impl eframe::App for Root {
         ui.painter().rect_filled(full, 0, egui::Color32::from_gray(40));
         ui.scope_builder(egui::UiBuilder::new().max_rect(r), |ui| {
             ui.set_clip_rect(r);
+            if let Ok(what) = std::env::var("OXIDE_WATCH_CALIB") {
+                oxide_remote_watch::calib::ui(ui, &what);
+                return;
+            }
             self.0.frame(ui);
             // the real screen is round: what is outside the circle is hidden
             let ring = 24.0;

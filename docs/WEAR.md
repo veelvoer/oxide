@@ -38,6 +38,10 @@ The PCs are the ones paired with the phone: nothing to pair on the watch.
 
 ## The gyro mouse
 
+**Point at the screen with your index finger and thumb, then move your hand: the pointer follows; pinch to click.** It
+also works while the watch's screen is off, for as long as a PC is open in the app (a quiet notification shows it; it
+stops when you leave the PC or close the app). Lower your arm to pause the pointer, raise it to carry on.
+
 Two modes (Setup > Cursor > Gyro): **Move** turns the wrist into mouse movement (rest your arm to stop), **Point** puts the
 pointer where your arm points (about 35° sideways reaches the screen's edge at speed 1; tap the middle to center). Set
 *Worn on right wrist* if you wear it on the right.

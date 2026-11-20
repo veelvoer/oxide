@@ -47,7 +47,7 @@ pub const ACCENTS: [(&str, u32); 8] = [
 
 impl Default for Settings {
     fn default() -> Self {
-        Self { theme: "watch".into(), accent: 0, cursor: "pad".into(), gyro_mode: "move".into(), right_wrist: false, speed: 1.0, invert_x: false, invert_y: false, pinch: true, pinch_level: 1.6, auto_update: true, token: String::new(), phone_addr: String::new(), dir: PathBuf::new() }
+        Self { theme: "watch".into(), accent: 0, cursor: "pad".into(), gyro_mode: "point".into(), right_wrist: false, speed: 1.0, invert_x: false, invert_y: false, pinch: true, pinch_level: 1.6, auto_update: true, token: String::new(), phone_addr: String::new(), dir: PathBuf::new() }
     }
 }
 

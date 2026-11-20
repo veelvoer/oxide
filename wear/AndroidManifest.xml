@@ -10,6 +10,9 @@
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <uses-permission android:name="android.permission.VIBRATE" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <!-- the gyro mouse reads the gyroscope and the accelerometer at their full speed -->
     <uses-permission android:name="android.permission.HIGH_SAMPLING_RATE_SENSORS" />
 
@@ -36,5 +39,6 @@
             </intent-filter>
         </activity>
         <receiver android:name="dev.oxide.remote.InstallReceiver" android:exported="false" />
+        <service android:name="dev.oxide.remote.GyroService" android:exported="false" android:foregroundServiceType="connectedDevice" />
     </application>
 </manifest>

@@ -4,6 +4,7 @@ use std::f32::consts::PI;
 
 use super::*;
 use crate::{
+    gyro::GyroCfg,
     round::{arc, round_button, smooth},
     settings::ACCENTS,
 };
@@ -41,13 +42,16 @@ impl App {
         let full = ui.max_rect();
         ui.painter().rect_filled(full, 0, p.bg);
         let geo = Geo::new(full);
-        // the sensors run only on the gyro pad (and its test in the settings)
-        let want_motion = (matches!(self.page, Page::Pc(_)) && self.tab == 0 && self.set.cursor == "gyro") || self.page == Page::Cursor;
-        if want_motion != self.motion_on {
-            self.motion_on = want_motion;
-            motion::enable(want_motion, self.set.pinch, self.set.pinch_level, self.set.gyro_mode == "point", if self.set.right_wrist { -1.0 } else { 1.0 });
-            self.test_pinches = 0;
-            self.point_ref = None;
+        // the gyro mouse runs on its own thread, also with the screen off, for as long as a PC is open with it (and for the
+        // pinch test in the settings): it ends when the PC is left or the app is closed
+        let on_pc = matches!(self.page, Page::Pc(_));
+        let want = (on_pc && self.set.cursor == "gyro") || (self.page == Page::Cursor && self.set.cursor == "gyro");
+        self.gyro.set(self.gyro_cfg(on_pc && self.gyro_live));
+        if want {
+            let wake_ctx = ctx.clone();
+            self.gyro.start(self.link.tx.clone(), move || wake_ctx.request_repaint());
+        } else {
+            self.gyro.stop();
         }
         match self.page {
             Page::Home => self.home(ui, geo, full),
@@ -301,14 +305,14 @@ impl App {
         let gyro = self.set.cursor == "gyro";
         let mut cells = vec![Cell::Back, Cell::Title("Cursor".into()), Cell::Choice { options: vec!["Touchpad".into(), "Gyro".into()], selected: usize::from(gyro) }];
         let mut acts = vec![Act::Back(Page::Settings), Act::None, Act::Option("cursor", 0)];
-        cells.push(Cell::Note(if gyro { "Move your hand, pinch to click" } else { "Drag to move, tap to click, hold for right click" }.into()));
+        cells.push(Cell::Note(if gyro { "Works with the screen off while the app is open" } else { "Drag to move, tap to click, hold for right click" }.into()));
         acts.push(Act::None);
         if gyro {
             let point = self.set.gyro_mode == "point";
             cells.push(Cell::Choice { options: vec!["Move".into(), "Point".into()], selected: usize::from(point) });
             acts.push(Act::Option("gyro_mode", 0));
             cells.push(Cell::Note(
-                if point { "Point your arm at the screen: the pointer goes where the arm points. Tap the middle to center." } else { "Like a mouse: turn your wrist and the pointer moves, rest your arm to stop." }.into(),
+                if point { "Point at the screen with your index finger and thumb, then move your hand: the pointer follows. Pinch to click. Lower your arm to pause." } else { "Like a mouse: turn your wrist and the pointer moves; rest your arm to stop. Pinch to click." }.into(),
             ));
             acts.push(Act::None);
         }
@@ -331,9 +335,8 @@ impl App {
             }
         }
         // the sensors run here for the pinch test
-        if self.motion_on {
-            let m = motion::poll();
-            self.test_pinches += m.pinches;
+        if self.gyro.running() {
+            self.test_pinches = self.gyro.shared.pinches.load(std::sync::atomic::Ordering::SeqCst);
             ui.ctx().request_repaint_after(Duration::from_millis(120));
         }
         if let Some((a, z)) = self.run_list(ui, geo, full, "cursor", cells, acts) {
@@ -386,13 +389,7 @@ impl App {
             "cursor" => {
                 self.set.cursor = ["pad", "gyro"][zone.min(1)].into();
             }
-            "gyro_mode" => {
-                self.set.gyro_mode = ["move", "point"][zone.min(1)].into();
-                self.point_ref = None;
-                if self.motion_on {
-                    motion::enable(true, self.set.pinch, self.set.pinch_level, self.set.gyro_mode == "point", if self.set.right_wrist { -1.0 } else { 1.0 });
-                }
-            }
+            "gyro_mode" => self.set.gyro_mode = ["move", "point"][zone.min(1)].into(),
             "speed" => {
                 if zone == 1 {
                     self.set.speed = (self.set.speed - 0.25).max(0.5);
@@ -406,22 +403,14 @@ impl App {
                 } else if zone == 2 {
                     self.set.pinch_level = (self.set.pinch_level + 0.2).min(4.0);
                 }
-                motion::enable(true, self.set.pinch, self.set.pinch_level, self.set.gyro_mode == "point", if self.set.right_wrist { -1.0 } else { 1.0 });
             }
             "invert_x" => self.set.invert_x = !self.set.invert_x,
             "invert_y" => self.set.invert_y = !self.set.invert_y,
             "right_wrist" => {
                 self.set.right_wrist = !self.set.right_wrist;
-                self.point_ref = None;
-                if self.motion_on {
-                    motion::enable(true, self.set.pinch, self.set.pinch_level, self.set.gyro_mode == "point", if self.set.right_wrist { -1.0 } else { 1.0 });
-                }
             }
             "pinch" => {
                 self.set.pinch = !self.set.pinch;
-                if self.motion_on {
-                    motion::enable(true, self.set.pinch, self.set.pinch_level, self.set.gyro_mode == "point", if self.set.right_wrist { -1.0 } else { 1.0 });
-                }
             }
             "auto_update" => self.set.auto_update = !self.set.auto_update,
             _ => {}
@@ -626,90 +615,52 @@ impl App {
         }
     }
 
-    /// The gyro mouse: the pointer follows the hand (like a mouse) or where the arm points; a pinch clicks.
+    /// The settings of the gyro mouse, as the thread wants them.
+    fn gyro_cfg(&self, send: bool) -> GyroCfg {
+        GyroCfg {
+            point: self.set.gyro_mode == "point",
+            speed: self.set.speed,
+            invert_x: self.set.invert_x,
+            invert_y: self.set.invert_y,
+            pinch: self.set.pinch,
+            pinch_level: self.set.pinch_level,
+            right_wrist: self.set.right_wrist,
+            send,
+        }
+    }
+
+    /// The gyro mouse's page: what it does runs on its own thread (gyro.rs); this shows it and takes the taps.
     fn gyro_pad(&mut self, ui: &mut Ui, g: Geo) {
         let p = pal();
         let ctx = ui.ctx().clone();
-        let m = motion::poll();
         let point = self.set.gyro_mode == "point";
-        if self.gyro_live {
-            if point {
-                if let Some((yaw, pitch)) = m.arm {
-                    let (y0, p0) = *self.point_ref.get_or_insert((yaw, pitch));
-                    let mut dyaw = yaw - y0;
-                    while dyaw > PI {
-                        dyaw -= 2.0 * PI;
-                    }
-                    while dyaw < -PI {
-                        dyaw += 2.0 * PI;
-                    }
-                    // about 35° to the side takes the pointer from the middle to the edge of the screen (at speed 1)
-                    let range = deg(35.0) / self.set.speed;
-                    let (mut x, mut y) = (0.5 + dyaw / (2.0 * range), 0.5 - (pitch - p0) / (2.0 * range * 0.6));
-                    if self.set.invert_x {
-                        x = 1.0 - x;
-                    }
-                    if self.set.invert_y {
-                        y = 1.0 - y;
-                    }
-                    let (x, y) = (x.clamp(0.0, 1.0), y.clamp(0.0, 1.0));
-                    // a little smoothing: the hand shakes
-                    let s = &mut self.point_pos;
-                    let (nx, ny) = (s.0 + (x - s.0) * 0.45, s.1 + (y - s.1) * 0.45);
-                    if (nx - s.0).abs() > 0.0012 || (ny - s.1).abs() > 0.0012 {
-                        *s = (nx, ny);
-                        self.send(ToPc::PointerTo { x: nx as f64, y: ny as f64 });
-                    }
-                }
-            } else {
-                const K: f32 = 2600.0;
-                let mut dx = -m.yaw * K * self.set.speed;
-                let mut dy = -m.pitch * K * self.set.speed;
-                if self.set.invert_x {
-                    dx = -dx;
-                }
-                if self.set.invert_y {
-                    dy = -dy;
-                }
-                if dx.abs() > 0.2 || dy.abs() > 0.2 {
-                    self.send(ToPc::PointerBy { dx: dx as f64, dy: dy as f64 });
-                }
-            }
-            if m.pinches > 0 && self.set.pinch {
-                let btn = match m.pinches {
-                    1 => Some("left"),
-                    3 => Some("right"),
-                    _ => None,
-                };
-                if let Some(b) = btn {
-                    self.send(ToPc::Click { button: b.into() });
-                    platform::haptic(1);
-                }
-                self.last_pinches = Some((m.pinches, Instant::now()));
-            }
-        }
-        // the middle: tap to pause (so the arm can rest) and to center the pointing
         let c = g.c;
+        // the middle: in the pointing mode it centers the pointer, otherwise it pauses (so the arm can rest)
         let resp = ui.interact(Rect::from_center_size(c, vec2(g.r, g.r)), ui.make_persistent_id("gyro-toggle"), egui::Sense::click());
         if resp.clicked() {
-            if point && self.gyro_live {
-                self.point_ref = None;
+            if point {
+                self.gyro.recenter();
             } else {
                 self.gyro_live = !self.gyro_live;
             }
             platform::haptic(0);
         }
-        let live_t = ctx.animate_bool_with_time(resp.id.with("live"), self.gyro_live, 0.18);
-        let flash = self.last_pinches.map(|(_, t)| (1.0 - t.elapsed().as_secs_f32() / 0.4).clamp(0.0, 1.0)).unwrap_or(0.0);
+        let arm_up = !point || self.gyro.shared.arm_up.load(std::sync::atomic::Ordering::Relaxed);
+        let live = self.gyro_live && arm_up;
+        let live_t = ctx.animate_bool_with_time(resp.id.with("live"), live, 0.18);
+        let last = self.gyro.shared.last_pinch.lock().ok().and_then(|l| *l);
+        let flash = last.map(|(_, t)| (1.0 - t.elapsed().as_secs_f32() / 0.4).clamp(0.0, 1.0)).unwrap_or(0.0);
         ui.painter().circle_filled(c, 26.0 + flash * 8.0, mix(p.raised, p.accent, live_t * 0.25 + flash * 0.6));
         ui.painter().circle_stroke(c, 26.0 + flash * 8.0, Stroke::new(2.0, mix(p.muted, p.accent, live_t)));
-        ui.painter().text(c, Align2::CENTER_CENTER, ic::MOUSE, icon_font(22.0, false), mix(p.muted, p.text, live_t));
+        crate::round::icon(ui, c, ic::MOUSE, 22.0, mix(p.muted, p.text, live_t));
         let hint = if !self.gyro_ok {
             "No gyro sensor".to_string()
         } else if !self.gyro_live {
             "Paused · tap to move".to_string()
+        } else if point && !arm_up {
+            "Raise your arm".to_string()
         } else {
-            match self.last_pinches {
+            match last {
                 Some((1, t)) if t.elapsed() < Duration::from_millis(900) => "Click".into(),
                 Some((3, t)) if t.elapsed() < Duration::from_millis(900) => "Right click".into(),
                 Some((n, t)) if t.elapsed() < Duration::from_millis(900) => format!("{n}× pinch"),
@@ -718,9 +669,7 @@ impl App {
             }
         };
         ui.painter().text(Pos2::new(c.x, c.y + 44.0), Align2::CENTER_CENTER, hint, FontId::proportional(10.0), p.muted);
-        if self.gyro_live {
-            ctx.request_repaint_after(Duration::from_millis(16));
-        } else if flash > 0.0 {
+        if flash > 0.0 {
             ctx.request_repaint();
         }
     }

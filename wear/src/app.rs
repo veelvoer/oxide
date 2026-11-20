@@ -14,6 +14,7 @@ use oxide_remote_proto::{
 
 use crate::{
     link::{self, Link, LinkEvent},
+    gyro::{Gyro, GyroCfg},
     motion, platform,
     round::{Cell, Geo, Hit, Scroller},
     settings::{Settings, ACCENTS},
@@ -128,19 +129,14 @@ pub struct App {
     toast: Option<(String, Instant)>,
     pal: Option<Pal>,
     last_theme: Instant,
-    /// the gyro mouse reads the sensors
-    motion_on: bool,
+    /// the gyro mouse (its own thread)
+    gyro: Gyro,
     /// the pointer follows the hand (tap the middle to pause)
     gyro_live: bool,
-    last_pinches: Option<(u32, Instant)>,
     test_pinches: u32,
     gyro_ok: bool,
     /// the scroll position of each list screen
     scroll: std::collections::HashMap<&'static str, Scroller>,
-    /// where the arm pointed when the pointing mode was last centered: (yaw, pitch) in radians
-    point_ref: Option<(f32, f32)>,
-    /// the smoothed pointing position (screen fractions)
-    point_pos: (f32, f32),
     /// frame timing, for the log (how smooth is it really)
     fps: (Instant, u32),
 }
@@ -191,14 +187,11 @@ impl App {
             toast: None,
             pal: None,
             last_theme: Instant::now() - Duration::from_secs(10),
-            motion_on: false,
+            gyro: Gyro::new(GyroCfg { point: true, speed: 1.0, invert_x: false, invert_y: false, pinch: true, pinch_level: 1.6, right_wrist: false, send: false }),
             gyro_live: true,
-            last_pinches: None,
             test_pinches: 0,
             gyro_ok: motion::has_gyro(),
             scroll: Default::default(),
-            point_ref: None,
-            point_pos: (0.5, 0.5),
             fps: (Instant::now(), 0),
         };
         if a.set.auto_update {

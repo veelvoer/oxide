@@ -8,6 +8,9 @@ pub mod jstream;
 pub mod theme;
 
 pub mod app;
+pub mod calib;
+pub mod icon_metrics;
+pub mod gyro;
 pub mod link;
 pub mod motion;
 pub mod round;
