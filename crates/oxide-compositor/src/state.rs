@@ -187,6 +187,8 @@ pub struct Oxide {
     pub idle_suspended_at: Option<std::time::Instant>,
     /// A swipe on a touchpad in progress: (fingers, distance since the last workspace change).
     pub swipe: Option<(u32, f64)>,
+    /// the shell and the autostart programs have been started
+    pub startup_done: bool,
     pub binds: Vec<CompiledBind>,
     /// Keys whose press triggered a bind; their release is not forwarded.
     pub suppressed: Vec<Keysym>,
@@ -425,6 +427,7 @@ impl Oxide {
             lid_inhibitor: None,
             idle_suspended_at: None,
             swipe: None,
+            startup_done: false,
             space: Space::default(),
             popups: PopupManager::default(),
             wins: vec![],
@@ -674,7 +677,24 @@ impl Oxide {
         }
         if self.config.general.xwayland {
             self.start_xwayland();
+            // the shell and the autostart programs must start with DISPLAY in their environment (Steam, Wine, Unity... are X11
+            // programs and open "a connection to X" from it): so they wait for XWayland, at most 3 seconds
+            use smithay::reexports::calloop::timer::{TimeoutAction, Timer};
+            let _ = self.loop_handle.insert_source(Timer::from_duration(std::time::Duration::from_secs(3)), |_, _, state| {
+                state.finish_startup();
+                TimeoutAction::Drop
+            });
+        } else {
+            self.finish_startup();
         }
+    }
+
+    /// The shell and the autostart programs start (once), when XWayland is ready and DISPLAY is set, or when it is not coming.
+    pub fn finish_startup(&mut self) {
+        if self.startup_done {
+            return;
+        }
+        self.startup_done = true;
         self.shell_active = (self.config.shell.enabled, self.config.shell.active.clone());
         self.restart_shell();
         self.start_shell_watchdog();

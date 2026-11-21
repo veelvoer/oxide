@@ -68,11 +68,17 @@ impl Oxide {
                         state.xwm = Some(wm);
                         std::env::set_var("DISPLAY", format!(":{display_number}"));
                         info!("XWayland ready on :{display_number}");
+                        // dbus-activated programs and services find the X display too, then the shell and autostart go
+                        state.spawn("command -v dbus-update-activation-environment >/dev/null && dbus-update-activation-environment --systemd DISPLAY");
+                        state.finish_startup();
                     }
                     Err(e) => error!("cannot attach X11 window manager: {e}"),
                 }
             }
-            XWaylandEvent::Error => warn!("XWayland crashed on startup"),
+            XWaylandEvent::Error => {
+                warn!("XWayland crashed on startup");
+                state.finish_startup();
+            }
         });
         if let Err(e) = res {
             error!("cannot insert XWayland source: {e}");

@@ -2,6 +2,10 @@
 
 ## 0.2.0 (unreleased)
 
+* Fixed: Steam (and every other X11 program started from the shell or the launcher) said "Unable to open a connection to X":
+  the shell and the autostart programs were started before XWayland was ready, so they had no DISPLAY. They now wait for
+  XWayland (3 s at most), and D-Bus-activated programs get DISPLAY too.
+
 * Watch: the bezel and the back button really work now (winit dropped the bezel's scroll events and swallowed the back key:
   a patched winit in `vendor/winit-wear` forwards them), with ticks under the finger and a scroll arc on the rim like Hearth.
 * Watch: with the gyro mouse the screen stays on but black (keep-screen-on, brightness 0) so battery saver cannot freeze it.
