@@ -42,7 +42,14 @@ public class BridgeService extends Service {
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
-        startAsForeground();
+        try {
+            startAsForeground();
+        } catch (Exception e) {
+            // Android did not allow a foreground service now (the system restarted it in the background): not a crash
+            android.util.Log.w("oxide-remote", "bridge service: " + e);
+            stopSelf();
+            return START_NOT_STICKY;
+        }
         synchronized (BridgeService.class) {
             if (acceptor == null || !acceptor.isAlive()) {
                 acceptor = new Thread(this::acceptLoop, "oxide-bridge-accept");

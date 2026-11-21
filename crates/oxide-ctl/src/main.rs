@@ -6,7 +6,7 @@ use oxide_config::Action;
 use oxide_ipc::{call, Request, Response};
 
 fn usage() -> ! {
-    eprintln!("usage: oxide-ctl <input ...|restart-shell|subscribe|get-config|reload|unlock|lock|state|set <config.toml>|import-hyprland [file] [--write]|dispatch <json-action>|exec <cmd>|workspace <n>|rule <app> k=v..|terminal [cmd]|files|ipc <target> <fn>|doctor|edit-config [line]|signal <busy|error|ok|clear> [--pid N]|default-config|quit>");
+    eprintln!("usage: oxide-ctl <input ...|restart-shell|subscribe|get-config|reload|unlock|lock|state|set <config.toml>|import-hyprland [file] [--write]|dispatch <json-action>|exec <cmd>|workspace <n>|rule <app> k=v..|terminal [cmd]|files|ipc <target> <fn>|preset <list|save|use|delete> [name]|doctor|edit-config [line]|signal <busy|error|ok|clear> [--pid N]|default-config|quit>");
     std::process::exit(2)
 }
 
@@ -157,6 +157,39 @@ fn main() {
         Some("default-config") => {
             print!("{}", oxide_config::Config::default().to_toml().unwrap_or_default());
             std::process::exit(0)
+        }
+        Some("preset") => {
+            use oxide_config::presets;
+            let say = |m: String| {
+                println!("{m}");
+                std::process::exit(0)
+            };
+            let fail = |m: String| -> ! {
+                eprintln!("{m}");
+                std::process::exit(1)
+            };
+            match (a.get(1).map(String::as_str), a.get(2)) {
+                (Some("list"), _) | (None, _) => say(presets::list().iter().map(|p| p.name.clone()).collect::<Vec<_>>().join("\n")),
+                (Some("save"), Some(n)) => match presets::save(&presets::capture(n)) {
+                    Ok(()) => say(format!("saved \"{n}\"")),
+                    Err(e) => fail(e.to_string()),
+                },
+                (Some("use"), Some(n)) => match presets::load(n) {
+                    Some(p) => match presets::apply(&p) {
+                        Ok(()) => {
+                            let _ = call(&Request::Reload);
+                            say(format!("\"{n}\" is in use"))
+                        }
+                        Err(e) => fail(e.to_string()),
+                    },
+                    None => fail(format!("no preset called \"{n}\"")),
+                },
+                (Some("delete"), Some(n)) => {
+                    presets::delete(n);
+                    say(format!("deleted \"{n}\""))
+                }
+                _ => fail("usage: oxide-ctl preset list | save <name> | use <name> | delete <name>".into()),
+            }
         }
         Some("lock") => lock(),
         Some("unlock") => {

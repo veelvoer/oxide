@@ -2,9 +2,14 @@
 //! service keeps the process and the sensors alive) and stops when the PC is left or the app is closed.
 //!
 //! *Point* mode: hold your hand like a pointing finger and thumb, point at the screen and move the hand: the pointer
-//! follows the way it points. *Move* mode: the wrist's turn is mouse movement. A pinch clicks (one pinch = left click,
-//! three = right click). Lowering the arm pauses the pointer, raising it carries on where it was.
+//! follows the way it points. *Move* mode: the wrist's turn is mouse movement. A pinch clicks.
+//!
+//! Smooth: the pointer goes through a One Euro filter (steady when the hand is slow, quick when it moves) and the phone
+//! chases the target at 160 steps a second. Accurate: closing the fingers moves the hand a little just before the tap is
+//! felt, so on a pinch the pointer goes back to where it was about 90 ms earlier, and only then the click is made; and
+//! the pointer holds still while the pinch is in the making.
 use std::{
+    collections::VecDeque,
     f32::consts::PI,
     sync::{
         atomic::{AtomicBool, AtomicU32, Ordering},
@@ -25,6 +30,7 @@ pub struct GyroCfg {
     pub invert_x: bool,
     pub invert_y: bool,
     pub pinch: bool,
+    pub pinch_count: bool,
     pub pinch_level: f32,
     pub right_wrist: bool,
     /// send to the PC (off while only the settings' pinch test runs)
@@ -40,6 +46,9 @@ pub struct Shared {
     pub pinches: AtomicU32,
     /// the arm is up (the pointer follows)
     pub arm_up: AtomicBool,
+    /// the strongest tap since the last look and what a tap has to reach, in thousandths of m/s2 (the sensitivity meter)
+    pub jerk_peak: AtomicU32,
+    pub jerk_threshold: AtomicU32,
 }
 
 pub struct Gyro {
@@ -51,6 +60,42 @@ pub struct Gyro {
 
 fn deg(d: f32) -> f32 {
     d * PI / 180.0
+}
+
+/// The One Euro filter: little lag when moving fast, little jitter when slow.
+pub struct OneEuro {
+    fc_min: f32,
+    beta: f32,
+    prev: Option<(f32, f32, Instant)>,
+}
+
+impl OneEuro {
+    pub fn new(fc_min: f32, beta: f32) -> Self {
+        Self { fc_min, beta, prev: None }
+    }
+
+    fn alpha(dt: f32, fc: f32) -> f32 {
+        let tau = 1.0 / (2.0 * PI * fc);
+        1.0 / (1.0 + tau / dt)
+    }
+
+    pub fn reset(&mut self, x: f32, now: Instant) {
+        self.prev = Some((x, 0.0, now));
+    }
+
+    pub fn filter(&mut self, x: f32, now: Instant) -> f32 {
+        let Some((px, pdx, pt)) = self.prev else {
+            self.prev = Some((x, 0.0, now));
+            return x;
+        };
+        let dt = now.saturating_duration_since(pt).as_secs_f32().max(0.001);
+        let dx = (x - px) / dt;
+        let edx = pdx + (dx - pdx) * Self::alpha(dt, 1.0);
+        let fc = self.fc_min + self.beta * edx.abs();
+        let out = px + (x - px) * Self::alpha(dt, fc);
+        self.prev = Some((out, edx, now));
+        out
+    }
 }
 
 impl Gyro {
@@ -83,14 +128,22 @@ impl Gyro {
         self.shared.pinches.store(0, Ordering::SeqCst);
         let (cfg, shared, recenter, running) = (self.cfg.clone(), self.shared.clone(), self.recenter.clone(), self.running.clone());
         std::thread::spawn(move || {
+            let send = |m: ToPc| {
+                let _ = tx.send(WatchReq::Send { msg: m });
+            };
             let mut applied = cfg0;
             // where the pointer is (fractions of the screen) and where the arm pointed at the last sample
             let mut pos = (0.5f32, 0.5f32);
             let mut last: Option<(f32, f32)> = None;
             let mut sent = (-1.0f32, -1.0f32);
+            let (mut fx, mut fy) = (OneEuro::new(1.4, 14.0), OneEuro::new(1.4, 14.0));
+            // the last 400 ms of where the pointer was (pointing) and of the moves made (mouse mode), to take a pinch back
+            let mut hist: VecDeque<(Instant, (f32, f32))> = VecDeque::new();
+            let mut moves: VecDeque<(Instant, (f32, f32))> = VecDeque::new();
             let mut idle_since: Option<Instant> = None;
+            let mut pinch_times: Vec<Instant> = vec![];
             while running.load(Ordering::SeqCst) {
-                std::thread::sleep(Duration::from_millis(15));
+                std::thread::sleep(Duration::from_millis(8));
                 let c = cfg.lock().map(|c| *c).unwrap_or(applied);
                 if c != applied {
                     if c.point != applied.point || c.pinch != applied.pinch || c.pinch_level != applied.pinch_level || c.right_wrist != applied.right_wrist {
@@ -109,14 +162,56 @@ impl Gyro {
                 }
                 idle_since = None;
                 let m = motion::poll();
+                let now = Instant::now();
+                shared.jerk_peak.fetch_max((m.jerk_peak * 1000.0) as u32, Ordering::Relaxed);
+                shared.jerk_threshold.store((m.jerk_threshold * 1000.0) as u32, Ordering::Relaxed);
                 if recenter.swap(false, Ordering::SeqCst) {
                     pos = (0.5, 0.5);
+                    fx.reset(0.5, now);
+                    fy.reset(0.5, now);
                     last = None;
                     sent = (-1.0, -1.0);
                 }
                 // a pinch is in the making (its first tap was just felt): the hand holds still
-                let pinching = m.spike_ms.is_some_and(|ms| ms < 380.0);
-                if m.pinches > 0 {
+                let hold = m.spike_ms.is_some_and(|ms| ms < if c.pinch_count { 330.0 } else { 220.0 });
+                // ---- pinches
+                if m.new_spikes > 0 && c.pinch && c.send && !c.pinch_count {
+                    // take the pointer back to where it was before the fingers closed, then click at once
+                    let ago = Duration::from_millis(m.spike_ms.unwrap_or(0.0) as u64 + 90);
+                    let at = now.checked_sub(ago).unwrap_or(now);
+                    if c.point {
+                        if let Some(&(_, p)) = hist.iter().rev().find(|(t, _)| *t <= at) {
+                            pos = p;
+                            fx.reset(p.0, now);
+                            fy.reset(p.1, now);
+                            sent = p;
+                            send(ToPc::PointerTo { x: p.0 as f64, y: p.1 as f64 });
+                        }
+                    } else {
+                        let (sx, sy) = moves.iter().filter(|(t, _)| *t > at).fold((0.0, 0.0), |a, (_, d)| (a.0 + d.0, a.1 + d.1));
+                        if sx != 0.0 || sy != 0.0 {
+                            send(ToPc::PointerBy { dx: -sx as f64, dy: -sy as f64 });
+                        }
+                    }
+                    for _ in 0..m.new_spikes {
+                        send(ToPc::Click { button: "left".into() });
+                    }
+                    motion::haptic(0);
+                    shared.pinches.fetch_add(m.new_spikes, Ordering::SeqCst);
+                    if let Ok(mut l) = shared.last_pinch.lock() {
+                        *l = Some((m.new_spikes, Instant::now()));
+                    }
+                    wake();
+                } else if m.new_spikes > 0 && !c.pinch_count {
+                    shared.pinches.fetch_add(m.new_spikes, Ordering::SeqCst);
+                    if let Ok(mut l) = shared.last_pinch.lock() {
+                        *l = Some((m.new_spikes, Instant::now()));
+                    }
+                    wake();
+                }
+                if m.pinches > 0 && c.pinch_count {
+                    // counting: 1 = left click, 3 = right click, after the window has closed
+                    pinch_times.clear();
                     shared.pinches.fetch_add(m.pinches, Ordering::SeqCst);
                     if let Ok(mut l) = shared.last_pinch.lock() {
                         *l = Some((m.pinches, Instant::now()));
@@ -128,7 +223,7 @@ impl Gyro {
                             _ => None,
                         };
                         if let Some(b) = button {
-                            let _ = tx.send(WatchReq::Send { msg: ToPc::Click { button: b.into() } });
+                            send(ToPc::Click { button: b.into() });
                             motion::haptic(1);
                         }
                     }
@@ -137,12 +232,13 @@ impl Gyro {
                 if !c.send {
                     continue;
                 }
+                // ---- the pointer
                 if c.point {
                     let Some((yaw, pitch)) = m.arm else { continue };
                     // arm lowered: paused; raised again: carries on from where the pointer was
                     let up = pitch > deg(-55.0);
                     shared.arm_up.store(up, Ordering::Relaxed);
-                    if !up || pinching {
+                    if !up || hold {
                         last = None;
                         continue;
                     }
@@ -150,12 +246,17 @@ impl Gyro {
                         pos = point_step(pos, prev, (yaw, pitch), &c);
                     }
                     last = Some((yaw, pitch));
-                    if (pos.0 - sent.0).abs() > 0.0008 || (pos.1 - sent.1).abs() > 0.0008 {
-                        sent = pos;
-                        let _ = tx.send(WatchReq::Send { msg: ToPc::PointerTo { x: pos.0 as f64, y: pos.1 as f64 } });
+                    let out = (fx.filter(pos.0, now), fy.filter(pos.1, now));
+                    hist.push_back((now, out));
+                    while hist.front().is_some_and(|(t, _)| now.duration_since(*t) > Duration::from_millis(400)) {
+                        hist.pop_front();
+                    }
+                    if (out.0 - sent.0).abs() > 0.0006 || (out.1 - sent.1).abs() > 0.0006 {
+                        sent = out;
+                        send(ToPc::PointerTo { x: out.0 as f64, y: out.1 as f64 });
                     }
                 } else {
-                    if pinching {
+                    if hold {
                         continue;
                     }
                     const K: f32 = 2600.0;
@@ -166,8 +267,12 @@ impl Gyro {
                     if c.invert_y {
                         dy = -dy;
                     }
-                    if dx.abs() > 0.2 || dy.abs() > 0.2 {
-                        let _ = tx.send(WatchReq::Send { msg: ToPc::PointerBy { dx: dx as f64, dy: dy as f64 } });
+                    if dx.abs() > 0.15 || dy.abs() > 0.15 {
+                        moves.push_back((now, (dx, dy)));
+                        while moves.front().is_some_and(|(t, _)| now.duration_since(*t) > Duration::from_millis(400)) {
+                            moves.pop_front();
+                        }
+                        send(ToPc::PointerBy { dx: dx as f64, dy: dy as f64 });
                     }
                 }
             }
@@ -210,7 +315,7 @@ mod tests {
     use super::*;
 
     fn cfg() -> GyroCfg {
-        GyroCfg { point: true, speed: 1.0, invert_x: false, invert_y: false, pinch: true, pinch_level: 1.6, right_wrist: false, send: true }
+        GyroCfg { point: true, speed: 1.0, invert_x: false, invert_y: false, pinch: true, pinch_count: false, pinch_level: 7.0, right_wrist: false, send: true }
     }
 
     #[test]
@@ -231,5 +336,27 @@ mod tests {
         assert!(y < 0.5);
         let (x, _) = point_step((0.95, 0.5), (0.0, 0.0), (deg(40.0), 0.0), &cfg());
         assert_eq!(x, 1.0);
+    }
+
+    #[test]
+    fn the_filter_calms_jitter_but_follows_a_real_move() {
+        let t0 = Instant::now();
+        let mut f = OneEuro::new(1.4, 14.0);
+        f.reset(0.5, t0);
+        // jitter of +-0.002 around 0.5: the output stays much closer to 0.5
+        let mut worst = 0.0f32;
+        for i in 1..60 {
+            let x = 0.5 + if i % 2 == 0 { 0.002 } else { -0.002 };
+            let y = f.filter(x, t0 + Duration::from_millis(10 * i));
+            worst = worst.max((y - 0.5).abs());
+        }
+        assert!(worst < 0.0012, "jitter passes: {worst}");
+        // a quick move of 0.4 in 100 ms is followed within 0.1 after 150 ms
+        let mut y = 0.5;
+        for i in 0..15u64 {
+            let x = 0.5 + (0.4 * (i as f32 / 10.0)).min(0.4);
+            y = f.filter(x, t0 + Duration::from_millis(600 + 10 * i));
+        }
+        assert!((0.9 - y).abs() < 0.1, "lags: {y}");
     }
 }

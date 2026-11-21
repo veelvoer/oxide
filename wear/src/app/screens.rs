@@ -32,6 +32,9 @@ impl App {
         let ctx = ui.ctx().clone();
         self.refresh_theme();
         self.poll(&ctx);
+        if let Some(p) = ctx.input(|i| i.pointer.latest_pos()) {
+            self.last_pos = Some(p);
+        }
         // how smooth is it really: the frame rate while something moves goes to the log every two seconds
         self.fps.1 += 1;
         if self.fps.0.elapsed() > Duration::from_secs(2) {
@@ -84,9 +87,10 @@ impl App {
 
     /// A finger that went from the left edge to the right, far enough: true once when it lifts.
     fn edge_swipe(&self, ctx: &egui::Context, full: Rect) -> bool {
+        let end = self.last_pos;
         ctx.input(|i| {
             i.pointer.primary_released()
-                && match (i.pointer.press_origin(), i.pointer.latest_pos()) {
+                && match (i.pointer.press_origin(), i.pointer.latest_pos().or(end)) {
                     (Some(o), Some(e)) => o.x < full.left() + full.width() * 0.2 && e.x - o.x > 50.0 && (e.y - o.y).abs() < 60.0,
                     _ => false,
                 }
@@ -328,8 +332,14 @@ impl App {
             cells.push(Cell::Toggle { title: "Click with a pinch".into(), on: self.set.pinch });
             acts.push(Act::Option("pinch", 0));
             if self.set.pinch {
-                cells.push(Cell::Stepper { title: "Pinch sensitivity".into(), value: format!("{:.1}", self.set.pinch_level) });
+                cells.push(Cell::Toggle { title: "3 pinches = right click".into(), on: self.set.pinch_count });
+                acts.push(Act::Option("pinch_count", 0));
+                cells.push(Cell::Stepper { title: "Pinch sensitivity (lower = easier)".into(), value: format!("{:.0}", self.set.pinch_level) });
                 acts.push(Act::Option("pinch_level", 0));
+                // the strength of the last taps against what counts as a pinch: pinch and see the bar pass the line
+                let thr = self.gyro.shared.jerk_threshold.load(std::sync::atomic::Ordering::Relaxed) as f32 / 1000.0;
+                cells.push(Cell::Meter { title: "Tap strength: pinch now".into(), fill: self.meter / (thr.max(0.3) * 2.0), mark: 0.5 });
+                acts.push(Act::None);
                 cells.push(Cell::Note(format!("Test: {} pinch{} seen", self.test_pinches, if self.test_pinches == 1 { "" } else { "es" })));
                 acts.push(Act::None);
             }
@@ -337,6 +347,8 @@ impl App {
         // the sensors run here for the pinch test
         if self.gyro.running() {
             self.test_pinches = self.gyro.shared.pinches.load(std::sync::atomic::Ordering::SeqCst);
+            let peak = self.gyro.shared.jerk_peak.swap(0, std::sync::atomic::Ordering::Relaxed) as f32 / 1000.0;
+            self.meter = (self.meter * 0.88).max(peak);
             ui.ctx().request_repaint_after(Duration::from_millis(120));
         }
         if let Some((a, z)) = self.run_list(ui, geo, full, "cursor", cells, acts) {
@@ -397,11 +409,12 @@ impl App {
                     self.set.speed = (self.set.speed + 0.25).min(3.0);
                 }
             }
+            "pinch_count" => self.set.pinch_count = !self.set.pinch_count,
             "pinch_level" => {
                 if zone == 1 {
-                    self.set.pinch_level = (self.set.pinch_level - 0.2).max(0.6);
+                    self.set.pinch_level = (self.set.pinch_level - 1.0).max(3.0);
                 } else if zone == 2 {
-                    self.set.pinch_level = (self.set.pinch_level + 0.2).min(4.0);
+                    self.set.pinch_level = (self.set.pinch_level + 1.0).min(20.0);
                 }
             }
             "invert_x" => self.set.invert_x = !self.set.invert_x,
@@ -482,10 +495,13 @@ impl App {
                 let edge = pos.x > full.right() - 0.26 * w || pos.x < full.left() + 0.26 * w;
                 let on_key = self.tab == 0 && Self::arc_hit(geo, pos).is_some();
                 // on the touchpad swipes page from the edges (its middle is the pointer's), elsewhere from anywhere
-                self.touch = Touch { start: if on_key { None } else { Some(pos) }, started_at: Some(Instant::now()), paging: false, pager0: self.pager, moved: 0.0, long_sent: false, can_page: !on_key && (self.tab != 0 || gyro || edge) };
+                self.touch = Touch { start: if on_key { None } else { Some(pos) }, last: Some(pos), started_at: Some(Instant::now()), paging: false, pager0: self.pager, moved: 0.0, long_sent: false, can_page: !on_key && (self.tab != 0 || gyro || edge) };
             }
         }
         if down {
+            if let Some(pos) = pos {
+                self.touch.last = Some(pos);
+            }
             if let (Some(start), Some(pos)) = (self.touch.start, pos) {
                 let d = pos - start;
                 self.touch.moved = self.touch.moved.max(d.length());
@@ -536,8 +552,8 @@ impl App {
                     platform::haptic(0);
                 }
             } else if self.tab == 0 {
-                // a tap: the pad clicks, a click arc clicks
-                if let Some(pos) = pos {
+                // a tap: the pad clicks, a click arc clicks (the finger is up: its place is the last one seen)
+                if let Some(pos) = pos.or(self.touch.last) {
                     if let Some(btn) = Self::arc_hit(geo, pos).filter(|_| self.touch.start.is_none()) {
                         self.send(ToPc::Click { button: btn.into() });
                         platform::haptic(0);
@@ -623,6 +639,7 @@ impl App {
             invert_x: self.set.invert_x,
             invert_y: self.set.invert_y,
             pinch: self.set.pinch,
+            pinch_count: self.set.pinch_count,
             pinch_level: self.set.pinch_level,
             right_wrist: self.set.right_wrist,
             send,

@@ -119,7 +119,8 @@ impl Oxide {
         if !matches!(profile, "eco" | "normal" | "performance") {
             return;
         }
-        let mut c = self.user_config.clone();
+        // from the file, not from memory: a change Settings has just written may not have been picked up yet
+        let mut c = oxide_config::Config::load().unwrap_or_else(|_| self.user_config.clone());
         c.power.profile = profile.into();
         let _ = c.save();
         self.config_mtime = crate::confwatch::mtime();

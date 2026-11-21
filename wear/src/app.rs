@@ -95,6 +95,8 @@ struct Pairing {
 #[derive(Default)]
 struct Touch {
     start: Option<Pos2>,
+    /// where the finger was last: a touch screen has no position once the finger is up
+    last: Option<Pos2>,
     started_at: Option<Instant>,
     /// the finger pages between the screens (it does not move the pointer)
     paging: bool,
@@ -123,6 +125,8 @@ pub struct App {
     /// where the pager is shown (0 = pad, 1 = controls, 2 = stats), moving smoothly toward `tab`
     pager: f32,
     touch: Touch,
+    /// the last place a finger was seen (a touch screen reports none once the finger is up)
+    last_pos: Option<Pos2>,
     live: Option<Live>,
     update: Update,
     pairing: Pairing,
@@ -134,6 +138,8 @@ pub struct App {
     /// the pointer follows the hand (tap the middle to pause)
     gyro_live: bool,
     test_pinches: u32,
+    /// the strongest recent tap, fading (the sensitivity meter)
+    meter: f32,
     gyro_ok: bool,
     /// the scroll position of each list screen
     scroll: std::collections::HashMap<&'static str, Scroller>,
@@ -181,15 +187,17 @@ impl App {
             tab: 0,
             pager: 0.0,
             touch: Touch::default(),
+            last_pos: None,
             live: None,
             update: Update::default(),
             pairing: Pairing::default(),
             toast: None,
             pal: None,
             last_theme: Instant::now() - Duration::from_secs(10),
-            gyro: Gyro::new(GyroCfg { point: true, speed: 1.0, invert_x: false, invert_y: false, pinch: true, pinch_level: 1.6, right_wrist: false, send: false }),
+            gyro: Gyro::new(GyroCfg { point: true, speed: 1.0, invert_x: false, invert_y: false, pinch: true, pinch_count: false, pinch_level: 7.0, right_wrist: false, send: false }),
             gyro_live: true,
             test_pinches: 0,
+            meter: 0.0,
             gyro_ok: motion::has_gyro(),
             scroll: Default::default(),
             fps: (Instant::now(), 0),

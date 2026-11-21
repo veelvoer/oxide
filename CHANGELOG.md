@@ -2,6 +2,22 @@
 
 ## 0.2.0 (unreleased)
 
+* New: **presets** (Settings > Presets, `oxide-ctl preset`): every setting under a name, with an automatic undo; and **GitHub
+  sign-in** (device flow or the GitHub CLI) to keep presets and setup in a private gist. The assistant's API key never
+  goes into a preset or to GitHub. See docs/PRESETS.md.
+* New: the bar's workspace styles of the old quickshell (numbers, dots, buttons, bars, scroll, stretch). *Highlight delay* is
+  in milliseconds: 0 follows at once.
+* New: Oxide's default fish prompt is the pill prompt (folder, git branch, time) in the theme's colors, also in terminals
+  that are already open (Settings > Terminal > Oxide's prompt).
+* Fixed: after unlocking, the shell was killed by a protocol error (the lock surface was unmapped with a NULL buffer) and the
+  bar came back only after the restart.
+* Fixed: settings that were lost when another change (control center profile, assistant, preset) was saved at the same time:
+  Settings now merges with the file and takes over outside changes; writes no longer share one temporary file.
+* Fixed: kitty, fish and GTK did not follow a theme changed by anything but Settings (the assistant, a preset, the file).
+* Watch: pointer filtered (One Euro) and chased by the phone, pinch clicks go back to where the pointer was 90 ms earlier, an
+  adaptive pinch detector with a live strength meter, taps on the touchpad and the back swipe work on a touch screen.
+* Phone and watch apps log panics to `crash.log` and keep running when one frame fails.
+
 * Watch: the gyro mouse points like a finger and thumb at the screen and follows your hand, a pinch clicks, and it keeps
   working with the screen off while the app is open (foreground service; ends when the PC is left or the app closed).
 * Watch: icons are aligned for the eye (each icon centered by its ink and mass, measured; `scripts/gen_icon_metrics.py`).

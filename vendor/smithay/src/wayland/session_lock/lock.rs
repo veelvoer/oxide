@@ -101,7 +101,12 @@ where
                 });
 
                 // Add pre-commit hook for updating surface state.
-                compositor::add_pre_commit_hook::<D, _>(&surface, |_state, _dh, surface| {
+                compositor::add_pre_commit_hook::<D, _>(&surface, |state, _dh, surface| {
+                    // once the session is unlocked the surface is only waiting to be destroyed: toolkits unmap it with a
+                    // NULL buffer then, which must not be a protocol error (it would kill the client, the shell, with it)
+                    if state.lock_state().locked_outputs.is_empty() {
+                        return;
+                    }
                     compositor::with_states(surface, |states| {
                         let attributes = states.data_map.get::<Mutex<LockSurfaceAttributes>>();
                         let attributes = attributes.unwrap().lock().unwrap();

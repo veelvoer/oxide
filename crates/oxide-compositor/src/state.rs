@@ -502,7 +502,15 @@ impl Oxide {
 
     /// Install a new config and apply everything that can change live.
     pub fn apply_config(&mut self, config: Config) {
+        // whatever changed the theme (Settings, the assistant, a preset, the file): the shell, kitty, fish and GTK follow
+        let theme_changed = config.theme != self.user_config.theme || config.own != self.user_config.own;
         self.user_config = config;
+        if theme_changed {
+            let theme = self.user_config.theme.clone();
+            std::thread::spawn(move || {
+                let _ = oxide_config::theme::write_all(&theme);
+            });
+        }
         self.apply_profile();
         self.power_config_changed();
         self.sync_remote();

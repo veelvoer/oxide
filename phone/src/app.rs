@@ -329,6 +329,9 @@ impl App {
     }
 
     fn open_pc(&mut self, i: usize) {
+        if i >= self.store.pcs.len() {
+            return;
+        }
         let ctx = self.ctx.clone();
         let session = net::open(&self.store.pcs[i], &self.store.phone_id, move || ctx.request_repaint());
         self.live = Some(Live {
@@ -387,7 +390,7 @@ impl App {
 
     /// Wake a PC: the magic packet from here (works at home), and through every other PC that is on (works away).
     fn wake(&mut self, i: usize) {
-        let pc = self.store.pcs[i].clone();
+        let Some(pc) = self.store.pcs.get(i).cloned() else { return };
         let mut ok = false;
         for m in &pc.macs {
             ok |= oxide_remote_proto::wake(m, pc.subnet_broadcast()).is_ok();

@@ -32,11 +32,13 @@ pub struct TerminalCfg {
     pub scrollback: u32,
     /// Show fish's welcome text when a terminal opens.
     pub greeting: bool,
+    /// Oxide's own fish prompt (pills with the folder, git branch and time), in the theme's colors.
+    pub prompt: bool,
 }
 
 impl Default for TerminalCfg {
     fn default() -> Self {
-        Self { font: "monospace".into(), font_size: 12.0, opacity: 0.95, padding: 10, cursor: "beam".into(), scrollback: 10_000, greeting: false }
+        Self { font: "monospace".into(), font_size: 12.0, opacity: 0.95, padding: 10, cursor: "beam".into(), scrollback: 10_000, greeting: false, prompt: true }
     }
 }
 
@@ -54,6 +56,21 @@ pub fn kitty_file() -> PathBuf {
 
 pub fn fish_file() -> PathBuf {
     config_dir().join("defaults/config.fish")
+}
+
+/// The prompt's colors: rewritten with the theme, read by the prompt each time it is drawn.
+pub fn prompt_colors_file() -> PathBuf {
+    config_dir().join("defaults/prompt-colors.fish")
+}
+
+/// The colors of the prompt, from the theme.
+pub fn prompt_colors(cfg: &Config) -> String {
+    let p = theme::palette(&cfg.theme);
+    let c = |h: &str| h.trim_start_matches('#').to_string();
+    format!(
+        "# Oxide's prompt colors (from the theme)\nset -g oxide_pill {}\nset -g oxide_git {}\nset -g oxide_fg {}\nset -g oxide_aqua {}\nset -g oxide_green {}\nset -g oxide_amber {}\nset -g oxide_red {}\n",
+        c(&p.raised), c(&p.line), c(&p.text), c(&p.accent), c(&p.good), c(&p.warn), c(&p.bad)
+    )
 }
 
 fn on_path(bin: &str) -> bool {
@@ -90,6 +107,11 @@ pub fn fish_default(cfg: &Config) -> String {
     }
     o.push_str(&format!("set -g fish_color_selection --background={}\nset -g fish_pager_color_selected_background --background={}\n", c(&p.raised), c(&p.raised)));
     o.push_str("\nalias ll 'ls -la'\nalias .. 'cd ..'\nalias ... 'cd ../..'\n");
+    if cfg.terminal.prompt {
+        o.push_str("\nif status is-interactive\n");
+        o.push_str(&include_str!("fish_prompt.fish").replace("@COLORS@", &prompt_colors_file().display().to_string()));
+        o.push_str("end\n");
+    }
     // telemetry: a long command that fails turns this window's border red (and makes it bigger); one that succeeds
     // flashes it green. Runs only inside Oxide, and only for commands that took more than 3 seconds.
     o.push_str("\nif set -q WAYLAND_DISPLAY; and command -q oxide-ctl\n    function __oxide_signal --on-event fish_postexec\n        set -l st $status\n        if test \"$CMD_DURATION\" -gt 3000\n            if test $st -eq 0\n                oxide-ctl signal ok --pid $fish_pid >/dev/null 2>&1 &\n            else\n                oxide-ctl signal error --pid $fish_pid >/dev/null 2>&1 &\n            end\n            disown 2>/dev/null\n        end\n    end\nend\n");
@@ -101,6 +123,7 @@ pub fn ensure(cfg: &Config) {
     let _ = std::fs::create_dir_all(kitty_dir());
     let _ = std::fs::write(kitty_file(), kitty_default(cfg));
     let _ = std::fs::write(fish_file(), fish_default(cfg));
+    let _ = std::fs::write(prompt_colors_file(), prompt_colors(cfg));
     apply_env(cfg);
 }
 

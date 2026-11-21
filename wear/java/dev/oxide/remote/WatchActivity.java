@@ -43,6 +43,11 @@ public class WatchActivity extends OxideActivity implements SensorEventListener 
     private boolean armOk = false;
     private final float[] rot = new float[9];
 
+    // the pinch detector adapts to the noise of the moment: a tap must stand out from it
+    private float noise = 0.06f;
+    private float threshold = 0.5f;
+    private float jerkPeak = 0;
+    private int newSpikes = 0;
     private float[] prevAcc = null;
     private long lastSpike = 0;
     private int spikes = 0;
@@ -145,11 +150,11 @@ public class WatchActivity extends OxideActivity implements SensorEventListener 
         if (enable) {
             armOk = false;
             Sensor rv = abs ? sm.getDefaultSensor(Sensor.TYPE_GAME_ROTATION_VECTOR) : null;
-            if (rv != null) sm.registerListener(this, rv, SensorManager.SENSOR_DELAY_GAME);
+            if (rv != null) sm.registerListener(this, rv, 10_000);
             Sensor g = sm.getDefaultSensor(Sensor.TYPE_GYROSCOPE);
             Sensor a = sm.getDefaultSensor(Sensor.TYPE_ACCELEROMETER);
             // SENSOR_DELAY_GAME is about 50 Hz: smooth enough for a pointer, light on the battery
-            if (g != null) sm.registerListener(this, g, SensorManager.SENSOR_DELAY_GAME);
+            if (g != null) sm.registerListener(this, g, 10_000);
             if (a != null) sm.registerListener(this, a, SensorManager.SENSOR_DELAY_FASTEST);
             yaw = pitch = 0;
             lastGyro = 0;
@@ -168,12 +173,14 @@ public class WatchActivity extends OxideActivity implements SensorEventListener 
     /** { yaw, pitch, pinches } since the last call. */
     public synchronized float[] motionPoll() {
         long now = System.nanoTime();
-        if (spikes > 0 && (now - lastSpike) > 350_000_000L) {
+        if (spikes > 0 && (now - lastSpike) > 300_000_000L) {
             ready = spikes;
             spikes = 0;
         }
         long ago = spikeAt == 0 ? -1 : (now - spikeAt) / 1_000_000L;
-        float[] r = { yaw, pitch, ready, armYaw, armPitch, armOk ? 1f : 0f, ago >= 0 && ago < 2000 ? (float) ago : -1f };
+        float[] r = { yaw, pitch, ready, armYaw, armPitch, armOk ? 1f : 0f, ago >= 0 && ago < 2000 ? (float) ago : -1f, newSpikes, jerkPeak, threshold };
+        newSpikes = 0;
+        jerkPeak = 0;
         yaw = pitch = 0;
         ready = 0;
         return r;
@@ -205,11 +212,17 @@ public class WatchActivity extends OxideActivity implements SensorEventListener 
                 float dx = v[0] - prevAcc[0], dy = v[1] - prevAcc[1], dz = v[2] - prevAcc[2];
                 float jerk = (float) Math.sqrt(dx * dx + dy * dy + dz * dz);
                 long now = e.timestamp;
-                // a pinch is sharp but the wrist is not moving much
-                if (jerk > pinchLevel && gyroMag < (absolute ? 2.4f : 1.2f) && (now - lastSpike) > 90_000_000L) {
+                // pinchLevel = how many times louder than the noise a tap must be (lower = more sensitive); never below 0.3 m/s2
+                threshold = Math.max(0.3f, pinchLevel * noise);
+                if (jerk > jerkPeak) jerkPeak = jerk;
+                // a pinch is sharp; the wrist may be moving (pointing) but not turning fast
+                if (jerk > threshold && gyroMag < (absolute ? 3.0f : 1.6f) && (now - lastSpike) > 110_000_000L) {
                     lastSpike = now;
                     spikeAt = now;
                     spikes++;
+                    newSpikes++;
+                } else if (jerk <= threshold) {
+                    noise = noise * 0.985f + jerk * 0.015f;
                 }
             }
             if (prevAcc == null) prevAcc = new float[3];

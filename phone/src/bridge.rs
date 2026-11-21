@@ -136,7 +136,7 @@ pub fn serve(dir: &Path, phone_name: &str, mut input: impl Read, output: impl Wr
     let mut watch_name = String::new();
     let session_gen = Arc::new(AtomicU64::new(0));
     let mut to_pc: Option<std::sync::mpsc::Sender<ToPc>> = None;
-    let mut glide: Option<std::sync::mpsc::Sender<(f64, f64)>> = None;
+    let mut glide: Option<std::sync::mpsc::Sender<Pipe>> = None;
     loop {
         let Ok(req) = read_msg::<WatchReq>(&mut input) else { break };
         match req {
@@ -184,7 +184,7 @@ pub fn serve(dir: &Path, phone_name: &str, mut input: impl Read, output: impl Wr
                     continue;
                 };
                 let session = net::open(&pc, &store.phone_id, || {});
-                glide = Some(smoother(session.to_pc.clone()));
+                glide = Some(pointer_pipe(session.to_pc.clone()));
                 to_pc = Some(session.to_pc);
                 let (out2, gen_now) = (out.clone(), session_gen.clone());
                 std::thread::spawn(move || {
@@ -214,7 +214,25 @@ pub fn serve(dir: &Path, phone_name: &str, mut input: impl Read, output: impl Wr
             }
             WatchReq::Send { msg: ToPc::PointerBy { dx, dy } } => {
                 if let Some(g) = &glide {
-                    let _ = g.send((dx, dy));
+                    let _ = g.send(Pipe::Rel(dx, dy));
+                }
+            }
+            WatchReq::Send { msg: ToPc::PointerTo { x, y } } => {
+                if let Some(g) = &glide {
+                    let _ = g.send(Pipe::Abs(x, y));
+                }
+            }
+            WatchReq::Send { msg: msg @ (ToPc::Click { .. } | ToPc::ButtonState { .. } | ToPc::Scroll { .. }) } => {
+                // through the pipe: the pointer arrives first
+                match &glide {
+                    Some(g) => {
+                        let _ = g.send(Pipe::Pass(msg));
+                    }
+                    None => {
+                        if let Some(tx) = &to_pc {
+                            let _ = tx.send(msg);
+                        }
+                    }
                 }
             }
             WatchReq::Send { msg } => {
@@ -239,18 +257,31 @@ fn watch_name_or(n: &str) -> String {
     }
 }
 
+/// What goes to the PC through the pointer pipe.
+enum Pipe {
+    /// a relative move (the touchpad, the gyro in its mouse mode)
+    Rel(f64, f64),
+    /// the pointer goes here (the gyro pointing at the screen), fractions of the screen
+    Abs(f64, f64),
+    /// anything else (a click...): what is still owed to the pointer is paid first, so a click lands where it was meant
+    Pass(ToPc),
+}
+
 /// Pointer moves from the watch arrive in bursts (Bluetooth carries a few packets a second when it is idle). This hands
-/// them to the PC spread over time instead, so the pointer glides: each tick moves a share of what is still owed.
-fn smoother(to_pc: std::sync::mpsc::Sender<ToPc>) -> std::sync::mpsc::Sender<(f64, f64)> {
-    let (tx, rx) = std::sync::mpsc::channel::<(f64, f64)>();
+/// them to the PC spread over time instead, so the pointer glides: each tick pays a share of what is owed (relative) or
+/// chases the target (absolute). A click flushes both first.
+fn pointer_pipe(to_pc: std::sync::mpsc::Sender<ToPc>) -> std::sync::mpsc::Sender<Pipe> {
+    let (tx, rx) = std::sync::mpsc::channel::<Pipe>();
     std::thread::spawn(move || {
-        const TICK: Duration = Duration::from_millis(8);
-        // how quickly what is owed is paid: about 45 ms
+        const TICK: Duration = Duration::from_millis(6);
+        // relative: about 45 ms to pay what is owed. absolute: the pointer closes 30 % of the gap per tick
         let share = 1.0 - (-(TICK.as_secs_f64()) / 0.045).exp();
         let (mut ox, mut oy) = (0.0f64, 0.0f64);
+        let mut target: Option<(f64, f64)> = None;
+        let mut cur: Option<(f64, f64)> = None;
+        let busy = |ox: f64, oy: f64, t: &Option<(f64, f64)>, c: &Option<(f64, f64)>| ox.abs() >= 0.01 || oy.abs() >= 0.01 || (t.is_some() && t != c);
         loop {
-            let first = if ox.abs() < 0.01 && oy.abs() < 0.01 {
-                // nothing owed: wait for the next move (the thread ends when the link does)
+            let first = if !busy(ox, oy, &target, &cur) {
                 match rx.recv() {
                     Ok(m) => Some(m),
                     Err(_) => return,
@@ -262,21 +293,58 @@ fn smoother(to_pc: std::sync::mpsc::Sender<ToPc>) -> std::sync::mpsc::Sender<(f6
                     Err(_) => return,
                 }
             };
-            if let Some((dx, dy)) = first {
-                ox += dx;
-                oy += dy;
-                while let Ok((dx, dy)) = rx.try_recv() {
-                    ox += dx;
-                    oy += dy;
+            let mut msgs: Vec<Pipe> = first.into_iter().collect();
+            while let Ok(m) = rx.try_recv() {
+                msgs.push(m);
+            }
+            for m in msgs {
+                match m {
+                    Pipe::Rel(dx, dy) => {
+                        ox += dx;
+                        oy += dy;
+                    }
+                    Pipe::Abs(x, y) => target = Some((x, y)),
+                    Pipe::Pass(msg) => {
+                        // flush: the pointer is where it should be before the message goes
+                        if ox != 0.0 || oy != 0.0 {
+                            let _ = to_pc.send(ToPc::PointerBy { dx: ox, dy: oy });
+                            ox = 0.0;
+                            oy = 0.0;
+                        }
+                        if let Some(t) = target {
+                            if cur != Some(t) {
+                                let _ = to_pc.send(ToPc::PointerTo { x: t.0, y: t.1 });
+                                cur = Some(t);
+                            }
+                        }
+                        let _ = to_pc.send(msg);
+                    }
                 }
             }
-            let (mx, my) = (ox * share, oy * share);
-            // the last bit is paid at once
-            let (mx, my) = if ox.abs() < 0.6 && oy.abs() < 0.6 { (ox, oy) } else { (mx, my) };
+            let (mx, my) = if ox.abs() < 0.6 && oy.abs() < 0.6 { (ox, oy) } else { (ox * share, oy * share) };
             ox -= mx;
             oy -= my;
             if (mx != 0.0 || my != 0.0) && to_pc.send(ToPc::PointerBy { dx: mx, dy: my }).is_err() {
                 return;
+            }
+            if let Some(t) = target {
+                let next = match cur {
+                    None => t,
+                    Some(c) => {
+                        let (dx, dy) = (t.0 - c.0, t.1 - c.1);
+                        if dx.abs() < 0.0004 && dy.abs() < 0.0004 {
+                            t
+                        } else {
+                            (c.0 + dx * 0.3, c.1 + dy * 0.3)
+                        }
+                    }
+                };
+                if cur != Some(next) {
+                    cur = Some(next);
+                    if to_pc.send(ToPc::PointerTo { x: next.0, y: next.1 }).is_err() {
+                        return;
+                    }
+                }
             }
         }
     });
@@ -345,7 +413,9 @@ mod glue {
         let vm = Arc::new(vm);
         let dir: String = env.get_string(&dir).map(Into::into).unwrap_or_default();
         let name: String = env.get_string(&name).map(Into::into).unwrap_or_default();
-        super::serve(&PathBuf::from(dir), &name, JStream { vm: vm.clone(), obj: i }, JStream { vm, obj: o });
+        // a panic must not unwind into Java (that would end the whole app): the watch's link just ends
+        let dir = PathBuf::from(dir);
+        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| super::serve(&dir, &name, JStream { vm: vm.clone(), obj: i }, JStream { vm, obj: o })));
     }
 }
 
@@ -386,6 +456,31 @@ mod tests {
     fn pipe() -> (PipeW, PipeR) {
         let (tx, rx) = channel();
         (PipeW(tx), PipeR { rx, buf: vec![] })
+    }
+
+    #[test]
+    fn a_click_waits_for_the_pointer() {
+        let (tx, rx) = channel::<ToPc>();
+        let pipe = pointer_pipe(tx);
+        pipe.send(Pipe::Rel(40.0, 0.0)).unwrap();
+        pipe.send(Pipe::Abs(0.25, 0.75)).unwrap();
+        pipe.send(Pipe::Pass(ToPc::Click { button: "left".into() })).unwrap();
+        let (mut dx, mut last) = (0.0, None);
+        let mut abs = None;
+        while let Ok(m) = rx.recv_timeout(Duration::from_millis(200)) {
+            match m {
+                ToPc::PointerBy { dx: d, .. } => dx += d,
+                ToPc::PointerTo { x, y } => abs = Some((x, y)),
+                ToPc::Click { .. } => {
+                    last = Some((dx, abs));
+                    break;
+                }
+                _ => {}
+            }
+        }
+        let (dx, abs) = last.expect("the click arrived");
+        assert!((dx - 40.0).abs() < 1e-6, "all that was owed was paid before the click, got {dx}");
+        assert_eq!(abs, Some((0.25, 0.75)));
     }
 
     #[test]

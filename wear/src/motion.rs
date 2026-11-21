@@ -10,6 +10,11 @@ pub struct Motion {
     pub arm: Option<(f32, f32)>,
     /// milliseconds since the last tap that might be a pinch (None when there was none lately)
     pub spike_ms: Option<f32>,
+    /// taps felt since the last poll (each could be a pinch)
+    pub new_spikes: u32,
+    /// the strongest jerk since the last poll, and what a tap has to reach (for the sensitivity meter)
+    pub jerk_peak: f32,
+    pub jerk_threshold: f32,
 }
 
 #[cfg(target_os = "android")]
@@ -63,9 +68,9 @@ mod imp {
         call(|env, a| {
             let o = env.call_method(a, "motionPoll", "()[F", &[])?.l()?;
             let arr = jni::objects::JFloatArray::from(o);
-            let mut v = [0f32; 7];
+            let mut v = [0f32; 10];
             env.get_float_array_region(&arr, 0, &mut v)?;
-            Ok(Motion { yaw: v[0], pitch: v[1], pinches: v[2] as u32, arm: (v[5] > 0.5).then_some((v[3], v[4])), spike_ms: (v[6] >= 0.0).then_some(v[6]) })
+            Ok(Motion { yaw: v[0], pitch: v[1], pinches: v[2] as u32, arm: (v[5] > 0.5).then_some((v[3], v[4])), spike_ms: (v[6] >= 0.0).then_some(v[6]), new_spikes: v[7] as u32, jerk_peak: v[8], jerk_threshold: v[9] })
         })
         .unwrap_or_default()
     }

@@ -22,6 +22,8 @@ pub struct Settings {
     pub invert_y: bool,
     /// the gyro mouse clicks on a pinch (1 pinch = left click, 3 = right click)
     pub pinch: bool,
+    /// three quick pinches are a right click (a single one then waits a moment to be sure it is single)
+    pub pinch_count: bool,
     /// how sharp a pinch must be (lower = more sensitive)
     pub pinch_level: f32,
     /// look for updates by itself
@@ -47,7 +49,7 @@ pub const ACCENTS: [(&str, u32); 8] = [
 
 impl Default for Settings {
     fn default() -> Self {
-        Self { theme: "watch".into(), accent: 0, cursor: "pad".into(), gyro_mode: "point".into(), right_wrist: false, speed: 1.0, invert_x: false, invert_y: false, pinch: true, pinch_level: 1.6, auto_update: true, token: String::new(), phone_addr: String::new(), dir: PathBuf::new() }
+        Self { theme: "watch".into(), accent: 0, cursor: "pad".into(), gyro_mode: "point".into(), right_wrist: false, speed: 1.0, invert_x: false, invert_y: false, pinch: true, pinch_count: false, pinch_level: 7.0, auto_update: true, token: String::new(), phone_addr: String::new(), dir: PathBuf::new() }
     }
 }
 
@@ -55,6 +57,10 @@ impl Settings {
     pub fn load(dir: PathBuf) -> Self {
         let mut s: Settings = std::fs::read_to_string(dir.join("watch.json")).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default();
         s.dir = dir;
+        // the sensitivity used to be a threshold in m/s2: now it is how many times louder than the noise a tap must be
+        if s.pinch_level < 3.0 {
+            s.pinch_level = 7.0;
+        }
         s
     }
 

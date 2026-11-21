@@ -2,6 +2,8 @@
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
+pub mod presets;
+pub mod sync;
 pub mod ai;
 pub mod anim;
 pub mod autotheme;
@@ -901,9 +903,43 @@ impl Config {
         if let Some(d) = p.parent() {
             std::fs::create_dir_all(d).map_err(Error::Io)?;
         }
-        let tmp = p.with_extension("toml.tmp");
+        // a name of its own: the compositor, Settings and the assistant may all write at the same moment
+        let tmp = p.with_extension(format!("toml.{}.tmp", std::process::id()));
         std::fs::write(&tmp, self.to_toml()?).map_err(Error::Io)?;
         std::fs::rename(&tmp, &p).map_err(Error::Io)
+    }
+
+    /// When the file on disk was last written.
+    pub fn disk_stamp() -> Option<std::time::SystemTime> {
+        std::fs::metadata(Self::path()).and_then(|m| m.modified()).ok()
+    }
+
+    /// Bring two edits of the same settings together: what `ours` changed since `base` is kept, everything else is `theirs`
+    /// (the file as somebody else wrote it meanwhile). Lists (binds, rules...) count as one value.
+    pub fn merge3(base: &Config, ours: &Config, theirs: &Config) -> Config {
+        fn merge(b: &serde_json::Value, o: &serde_json::Value, t: &serde_json::Value) -> serde_json::Value {
+            use serde_json::Value::Object;
+            if o == b {
+                return t.clone();
+            }
+            if t == b || t == o {
+                return o.clone();
+            }
+            match (b, o, t) {
+                (Object(bm), Object(om), Object(tm)) => {
+                    let mut out = tm.clone();
+                    for (k, ov) in om {
+                        let bv = bm.get(k).cloned().unwrap_or(serde_json::Value::Null);
+                        let tv = tm.get(k).cloned().unwrap_or(serde_json::Value::Null);
+                        out.insert(k.clone(), merge(&bv, ov, &tv));
+                    }
+                    Object(out)
+                }
+                _ => o.clone(),
+            }
+        }
+        let j = |c: &Config| serde_json::to_value(c).unwrap_or(serde_json::Value::Null);
+        serde_json::from_value(merge(&j(base), &j(ours), &j(theirs))).unwrap_or_else(|_| ours.clone())
     }
 }
 
@@ -922,6 +958,21 @@ pub fn parse_color(s: &str) -> Option<[f32; 4]> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn merge_keeps_both_edits() {
+        let base = Config::default();
+        let mut ours = base.clone();
+        ours.general.gaps_in = 17;
+        let mut theirs = base.clone();
+        theirs.power.profile = "eco".into();
+        let m = Config::merge3(&base, &ours, &theirs);
+        assert_eq!(m.general.gaps_in, 17);
+        assert_eq!(m.power.profile, "eco");
+        // the same field edited on both sides: ours wins
+        theirs.general.gaps_in = 3;
+        assert_eq!(Config::merge3(&base, &ours, &theirs).general.gaps_in, 17);
+    }
     #[test]
     fn roundtrip() {
         let c = Config::default();

@@ -73,6 +73,8 @@ pub enum Cell {
     Swatches { colors: Vec<Color32>, selected: Option<usize> },
     /// a PC: zone 0 opens it, zone 3 is its wake button
     Pc { name: String, sub: String, dot: Color32, wake_accent: bool },
+    /// a bar: how far it is filled and where the line is it has to reach (both 0..1)
+    Meter { title: String, fill: f32, mark: f32 },
     Back,
     Spacer(f32),
 }
@@ -91,6 +93,7 @@ impl Cell {
             }
             Cell::Toggle { .. } => 44.0,
             Cell::Stepper { .. } => 56.0,
+            Cell::Meter { .. } => 48.0,
             Cell::Choice { .. } => 40.0,
             Cell::Button { .. } => 42.0,
             Cell::Swatches { .. } => 42.0,
@@ -378,6 +381,17 @@ fn draw_cell(ui: &Ui, cell: &Cell, rect: Rect, alpha: f32, pressed: bool, p: Pal
                 ui.painter().circle_filled(wc, 18.0, a(p.raised, alpha));
                 self::icon(ui, wc, "\u{E3DA}", 16.0, if *wake_accent { accent } else { muted });
             }
+        }
+        Cell::Meter { title, fill, mark } => {
+            ui.painter().rect_filled(r, pill, card);
+            ui.painter().text(Pos2::new(r.center().x, r.top() + 13.0), Align2::CENTER_CENTER, title, FontId::proportional(10.5), muted);
+            let bar = Rect::from_center_size(Pos2::new(r.center().x, r.bottom() - 15.0), vec2(r.width() - 44.0, 8.0));
+            ui.painter().rect_filled(bar, 4, a(p.raised, alpha));
+            let f = fill.clamp(0.0, 1.0);
+            let col = if f >= *mark { a(p.good, alpha) } else { accent };
+            ui.painter().rect_filled(Rect::from_min_size(bar.min, vec2(bar.width() * f, bar.height())), 4, col);
+            let mx = bar.left() + bar.width() * mark.clamp(0.0, 1.0);
+            ui.painter().line_segment([Pos2::new(mx, bar.top() - 3.0), Pos2::new(mx, bar.bottom() + 3.0)], Stroke::new(2.0, ink));
         }
         Cell::Back => {
             ui.painter().rect_filled(Rect::from_center_size(rect.center(), vec2(64.0, r.height())), pill, card);

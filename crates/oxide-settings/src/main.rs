@@ -6,6 +6,7 @@ mod syntax;
 mod termpage;
 mod pages;
 mod phonepage;
+mod presetpage;
 mod barpage;
 mod launcherpage;
 mod shellpage;
@@ -47,6 +48,7 @@ pub enum Page {
     Terminal,
     Own,
     Config,
+    Presets,
 }
 
 struct NavItem {
@@ -64,7 +66,7 @@ const fn nav(page: Page, name: &'static str, icon: &'static str, group: &'static
 }
 
 impl Page {
-    const ALL: [NavItem; 20] = [
+    const ALL: [NavItem; 21] = [
         nav(Page::Wifi, "Wi-Fi", "wifi", "System", "network internet wireless password connect", false),
         nav(Page::Bluetooth, "Bluetooth", "bluetooth", "System", "headphones pair device speaker", false),
         nav(Page::Sound, "Sound", "volume-high", "System", "volume audio speaker microphone mute output input", false),
@@ -84,6 +86,7 @@ impl Page {
         nav(Page::Terminal, "Terminal", "console-line", "Desktop", "kitty fish font size opacity padding cursor shell prompt", false),
         nav(Page::Apps, "Apps", "console-line", "Oxide", "startup autostart rules environment variables xwayland", true),
         nav(Page::Own, "Own configs", "text-box-edit-outline", "Oxide", "own custom kitty fish gtk shell editor syntax file upload import", true),
+        nav(Page::Presets, "Presets", "tune-variant", "Oxide", "save backup github sign in sync gist preset profile share export import setup", false),
         nav(Page::Config, "Config", "cog-outline", "Oxide", "import export reset file hyprland backup update version", false),
     ];
 }
@@ -107,7 +110,10 @@ pub struct App {
     pub ctx: egui::Context,
     pub advanced: bool,
     seed_stamp: Option<std::time::SystemTime>,
+    /// the config file as we last wrote or read it (somebody else writing it shows as another stamp)
+    disk_stamp: Option<std::time::SystemTime>,
     pub jobs: system::Jobs,
+    pub presets: presetpage::PresetState,
     pub wifi: system::Bg<system::WifiState>,
     pub bt: system::Bg<system::BtState>,
     pub audio: system::Bg<system::AudioState>,
@@ -161,7 +167,9 @@ impl App {
             advanced,
             phone: Default::default(),
             seed_stamp: None,
+            disk_stamp: Config::disk_stamp(),
             jobs: Default::default(),
+            presets: Default::default(),
             wifi: Default::default(),
             bt: Default::default(),
             audio: Default::default(),
@@ -236,6 +244,15 @@ impl App {
 
     fn poll(&mut self) {
         self.last_poll = Instant::now();
+        // somebody else changed the file (the control center, the assistant, a preset) and we have nothing unsaved: take it over
+        if Config::disk_stamp() != self.disk_stamp && !self.dirty() {
+            if let Ok(c) = Config::load() {
+                self.disk_stamp = Config::disk_stamp();
+                self.cfg = c.clone();
+                self.saved = c.clone();
+                self.sent = c;
+            }
+        }
         match call(&Request::GetState) {
             Ok(Response::State { state }) => {
                 self.connected = true;
@@ -260,8 +277,23 @@ impl App {
         }
     }
 
+    /// Write the settings, first folding in what somebody else wrote to the file meanwhile (the control center, the
+    /// assistant, a preset): their change stays, ours is added, nothing is overwritten with an old copy.
+    fn write_merged(&mut self) -> Result<(), oxide_config::Error> {
+        if Config::disk_stamp() != self.disk_stamp {
+            if let Ok(theirs) = Config::load() {
+                if theirs != self.saved {
+                    self.cfg = Config::merge3(&self.saved, &self.cfg, &theirs);
+                }
+            }
+        }
+        self.cfg.save()?;
+        self.disk_stamp = Config::disk_stamp();
+        Ok(())
+    }
+
     pub fn save(&mut self) {
-        match self.cfg.save() {
+        match self.write_merged() {
             Ok(()) => {
                 self.saved = self.cfg.clone();
                 self.say("Saved");
@@ -272,7 +304,7 @@ impl App {
 
     /// Write to disk without a toast (used by apply-instantly).
     fn autosave(&mut self) {
-        if let Err(e) = self.cfg.save() {
+        if let Err(e) = self.write_merged() {
             self.say(format!("Could not save: {e}"));
         } else {
             self.saved = self.cfg.clone();
@@ -578,6 +610,7 @@ impl eframe::App for App {
                             Page::Bluetooth => syspages::bluetooth(self, ui),
                             Page::Sound => syspages::sound(self, ui),
                             Page::Power => syspages::power(self, ui),
+                            Page::Presets => presetpage::page(self, ui),
                             Page::Phone => phonepage::page(self, ui),
                             Page::Appearance => pages::appearance(self, ui),
                             Page::Layout => pages::layout(self, ui),
@@ -588,6 +621,7 @@ impl eframe::App for App {
                             Page::Apps => pages::apps(self, ui),
                             Page::Terminal => termpage::page(self, ui),
                             Page::Own => ownpage::page(self, ui),
+                            Page::Presets => presetpage::page(self, ui),
                             Page::Config => pages::config(self, ui),
                         }
                         ui.add_space(110.0);

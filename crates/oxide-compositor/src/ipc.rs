@@ -94,7 +94,7 @@ impl Oxide {
                 Response::Ok
             }
             Request::SetRule { app_id, rule, clear } => {
-                let mut cfg = self.user_config.clone();
+                let mut cfg = oxide_config::Config::load().unwrap_or_else(|_| self.user_config.clone());
                 let i = cfg.rules.iter().position(|r| r.title.is_none() && r.app_id.as_ref().is_some_and(|a| a.eq_ignore_ascii_case(&app_id)));
                 let i = i.unwrap_or_else(|| {
                     cfg.rules.push(oxide_config::WindowRule { app_id: Some(app_id.clone()), ..Default::default() });

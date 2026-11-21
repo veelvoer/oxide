@@ -64,6 +64,7 @@ pub fn page(app: &mut App, ui: &mut Ui) {
     });
     card(ui, "Shell", |ui| {
         toggle_row(ui, "Show the welcome message", "The line fish prints when a terminal opens.", false, &mut app.cfg.terminal.greeting);
+        toggle_row(ui, "Oxide's prompt", "Pills with the folder, git branch and time, in the theme's colors. Off keeps fish's own prompt.", false, &mut app.cfg.terminal.prompt);
         let mut sb = app.cfg.terminal.scrollback as i64;
         slider_row(ui, "History", "Lines you can scroll back through.", true, &mut sb, 1000..=100_000, "");
         app.cfg.terminal.scrollback = sb as u32;
