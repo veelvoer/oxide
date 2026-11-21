@@ -35,6 +35,12 @@ impl App {
         if let Some(p) = ctx.input(|i| i.pointer.latest_pos()) {
             self.last_pos = Some(p);
         }
+        // the watch's own controls: the bezel scrolls, back goes back (Escape does on a computer)
+        self.rot = crate::input::take_rotary();
+        if crate::input::take_back() || ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
+            self.go_back();
+            return;
+        }
         // how smooth is it really: the frame rate while something moves goes to the log every two seconds
         self.fps.1 += 1;
         if self.fps.0.elapsed() > Duration::from_secs(2) {
@@ -67,11 +73,8 @@ impl App {
             Page::Updates => self.updates_page(ui, geo, full),
         }
         // swipe right from the left edge: one step back (as on any watch)
-        if !matches!(self.page, Page::Home | Page::Pc(_)) && self.edge_swipe(&ctx, full) {
-            self.page = match self.page {
-                Page::Theme | Page::Cursor | Page::Updates | Page::Phone => Page::Settings,
-                _ => Page::Home,
-            };
+        if !matches!(self.page, Page::Pc(_)) && self.edge_swipe(&ctx, full) {
+            self.go_back();
         }
         if let Some((t, at)) = &self.toast {
             if at.elapsed() < Duration::from_millis(2200) {
@@ -82,6 +85,27 @@ impl App {
             } else {
                 self.toast = None;
             }
+        }
+    }
+
+    /// One step back, as the back button and the swipe from the left edge do: a screen up; from the first screen the app closes
+    /// (the watch face is next), as on every Wear OS app.
+    pub fn go_back(&mut self) {
+        match self.page {
+            Page::Home => {
+                self.gyro.stop();
+                motion::exit_app();
+            }
+            Page::Pc(_) => {
+                if self.tab > 0 {
+                    self.tab -= 1;
+                    platform::haptic(0);
+                } else {
+                    self.leave_pc();
+                }
+            }
+            Page::Theme | Page::Cursor | Page::Updates | Page::Phone => self.page = Page::Settings,
+            Page::Settings | Page::Pair => self.page = Page::Home,
         }
     }
 
@@ -100,6 +124,7 @@ impl App {
     /// Draw a list and run what was tapped.
     fn run_list(&mut self, ui: &mut Ui, geo: Geo, full: Rect, key: &'static str, cells: Vec<Cell>, acts: Vec<Act>) -> Option<(Act, usize)> {
         let mut sc = self.scroll.remove(key).unwrap_or_default();
+        sc.nudge(self.rot);
         let hit: Option<Hit> = crate::round::list(ui, geo, full, &mut sc, &cells);
         self.scroll.insert(key, sc);
         hit.map(|h| (acts.get(h.index).cloned().unwrap_or(Act::None), h.zone))
@@ -312,6 +337,10 @@ impl App {
         cells.push(Cell::Note(if gyro { "Works with the screen off while the app is open" } else { "Drag to move, tap to click, hold for right click" }.into()));
         acts.push(Act::None);
         if gyro {
+            // battery saver and Samsung's sleeping apps stop apps with the screen off: "unrestricted" lets the pointer go on
+            let exempt = motion::battery_exempt();
+            cells.push(Cell::Row { icon: ic::POWER, title: "Screen off".into(), sub: if exempt { "Keeps working".into() } else { "Tap: allow in battery saver".into() }, caret: !exempt });
+            acts.push(if exempt { Act::None } else { Act::Run("battery") });
             let point = self.set.gyro_mode == "point";
             cells.push(Cell::Choice { options: vec!["Move".into(), "Point".into()], selected: usize::from(point) });
             acts.push(Act::Option("gyro_mode", 0));
@@ -437,6 +466,7 @@ impl App {
     fn run_action(&mut self, what: &'static str) {
         match what {
             "check" => self.check_update(),
+            "battery" => motion::request_battery_exempt(),
             "install" => {
                 if let Some((_, url)) = self.update.latest.clone() {
                     platform::install_update(&url);
@@ -577,6 +607,10 @@ impl App {
                 self.pager = self.tab as f32;
             }
         }
+        // the bezel on the first page is the mouse wheel of the PC
+        if self.tab == 0 && self.rot != 0.0 {
+            self.send(ToPc::Scroll { dx: 0.0, dy: self.rot as f64 * 1.2 });
+        }
         // ---- the three pages
         for k in 0..3usize {
             let off = (k as f32 - self.pager) * w;
@@ -696,7 +730,7 @@ impl App {
         let p = pal();
         let ctx = ui.ctx().clone();
         // the rotary bezel (or a two-finger scroll) sets the volume
-        let scroll = ctx.input(|i| i.smooth_scroll_delta.y);
+        let scroll = ctx.input(|i| i.smooth_scroll_delta.y) + self.rot;
         if scroll.abs() > 0.5 {
             let mut set = None;
             if let Some(l) = self.live.as_mut() {

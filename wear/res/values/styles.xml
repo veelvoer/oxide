@@ -2,6 +2,8 @@
 <resources>
     <style name="Theme.OxideRemote" parent="android:Theme.Material.NoActionBar">
         <item name="android:windowBackground">@color/bg</item>
+        <!-- the app goes back itself (a swipe from the left edge, the back button): the system must not close it from any screen -->
+        <item name="android:windowSwipeToDismiss">false</item>
         <item name="android:statusBarColor">@color/bg</item>
         <item name="android:navigationBarColor">@color/bg</item>
     </style>

@@ -15,6 +15,13 @@ PCs and passes everything on. A watch on Wi-Fi drains its battery; Bluetooth to 
 
 The PCs are the ones paired with the phone: nothing to pair on the watch.
 
+## Wear OS controls
+
+The touch bezel scrolls lists, sets the volume on the controls page and is the mouse wheel on the touchpad page. The back
+button goes back one screen and closes the app from the first one; a swipe from the left edge goes back too. With the gyro
+mouse and battery saver: open Setup > Cursor > *Screen off* once and allow the app to run without limits, or the watch may
+still freeze it when the screen is off (also: watch Settings > Apps > Oxide Remote > Battery > Unrestricted).
+
 ## Screens
 
 * **Home**: your PCs (from the phone) with their state; tap to open, the round power button wakes one (the phone sends

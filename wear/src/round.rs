@@ -130,6 +130,14 @@ pub struct Scroller {
 }
 
 impl Scroller {
+    /// Move by the bezel's turn (clockwise brings the content up).
+    pub fn nudge(&mut self, turn: f32) {
+        if turn != 0.0 {
+            self.off += turn;
+            self.vel = 0.0;
+        }
+    }
+
     pub fn reset(&mut self) {
         *self = Scroller::default();
     }

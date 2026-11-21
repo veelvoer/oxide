@@ -60,6 +60,19 @@ mod imp {
         crate::platform::haptic(kind);
     }
 
+    pub fn battery_exempt() -> bool {
+        call(|env, a| env.call_method(a, "batteryExempt", "()Z", &[])?.z()).unwrap_or(false)
+    }
+
+    pub fn request_battery_exempt() {
+        call(|env, a| env.call_method(a, "requestBatteryExempt", "()V", &[]).map(|_| ()));
+    }
+
+    /// Close the app (back from the first screen).
+    pub fn exit_app() {
+        call(|env, a| env.call_method(a, "exitApp", "()V", &[]).map(|_| ()));
+    }
+
     pub fn has_gyro() -> bool {
         call(|env, a| env.call_method(a, "hasGyro", "()Z", &[])?.z()).unwrap_or(false)
     }
@@ -88,6 +101,13 @@ mod imp {
         true
     }
     pub fn haptic(_: i32) {}
+    pub fn exit_app() {
+        std::process::exit(0);
+    }
+    pub fn battery_exempt() -> bool {
+        true
+    }
+    pub fn request_battery_exempt() {}
     pub fn poll() -> Motion {
         Motion::default()
     }

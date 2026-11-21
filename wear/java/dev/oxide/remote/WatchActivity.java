@@ -149,13 +149,14 @@ public class WatchActivity extends OxideActivity implements SensorEventListener 
         on = enable;
         if (enable) {
             armOk = false;
-            Sensor rv = abs ? sm.getDefaultSensor(Sensor.TYPE_GAME_ROTATION_VECTOR) : null;
-            if (rv != null) sm.registerListener(this, rv, 10_000);
-            Sensor g = sm.getDefaultSensor(Sensor.TYPE_GYROSCOPE);
-            Sensor a = sm.getDefaultSensor(Sensor.TYPE_ACCELEROMETER);
-            // SENSOR_DELAY_GAME is about 50 Hz: smooth enough for a pointer, light on the battery
-            if (g != null) sm.registerListener(this, g, 10_000);
-            if (a != null) sm.registerListener(this, a, SensorManager.SENSOR_DELAY_FASTEST);
+            // wake-up sensors keep delivering while the watch sleeps (battery saver, screen off); the plain ones are the fallback
+            Sensor rv = abs ? sensor(Sensor.TYPE_GAME_ROTATION_VECTOR) : null;
+            if (rv != null) sm.registerListener(this, rv, 10_000, 0);
+            Sensor g = sensor(Sensor.TYPE_GYROSCOPE);
+            Sensor a = sensor(Sensor.TYPE_ACCELEROMETER);
+            // about 100 Hz: smooth enough for a pointer
+            if (g != null) sm.registerListener(this, g, 10_000, 0);
+            if (a != null) sm.registerListener(this, a, SensorManager.SENSOR_DELAY_FASTEST, 0);
             yaw = pitch = 0;
             lastGyro = 0;
             prevAcc = null;
@@ -164,6 +165,35 @@ public class WatchActivity extends OxideActivity implements SensorEventListener 
         } else {
             sm.unregisterListener(this);
         }
+    }
+
+    private Sensor sensor(int type) {
+        Sensor s = null;
+        try {
+            s = sm.getDefaultSensor(type, true);
+        } catch (Exception ignored) {
+        }
+        return s != null ? s : sm.getDefaultSensor(type);
+    }
+
+    /** True when Android lets this app run in the background without limits (battery saver and Samsung's sleeping apps). */
+    public boolean batteryExempt() {
+        android.os.PowerManager pm = (android.os.PowerManager) getSystemService(Context.POWER_SERVICE);
+        return pm != null && pm.isIgnoringBatteryOptimizations(getPackageName());
+    }
+
+    /** Ask for that: the system shows its own question; where it has none, the app's page in the settings opens. */
+    public void requestBatteryExempt() {
+        runOnUiThread(() -> {
+            try {
+                startActivity(new android.content.Intent(android.provider.Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, android.net.Uri.parse("package:" + getPackageName())));
+            } catch (Exception e) {
+                try {
+                    startActivity(new android.content.Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS, android.net.Uri.parse("package:" + getPackageName())));
+                } catch (Exception ignored) {
+                }
+            }
+        });
     }
 
     public boolean hasGyro() {
@@ -232,6 +262,50 @@ public class WatchActivity extends OxideActivity implements SensorEventListener 
 
     @Override
     public void onAccuracyChanged(Sensor s, int accuracy) {}
+
+    // ---- the watch's own controls: the touch bezel scrolls, the back button goes back (the app decides what back means)
+    private static native void nativeInput(int kind, float value);
+
+    private float rotaryAcc = 0;
+
+    @Override
+    public boolean dispatchGenericMotionEvent(android.view.MotionEvent e) {
+        if (e.getAction() == android.view.MotionEvent.ACTION_SCROLL && e.isFromSource(android.view.InputDevice.SOURCE_ROTARY_ENCODER)) {
+            // clockwise is positive scroll in the app; a few pixels per click, as the system's lists
+            float v = -e.getAxisValue(android.view.MotionEvent.AXIS_SCROLL) * android.view.ViewConfiguration.get(this).getScaledVerticalScrollFactor();
+            try {
+                nativeInput(0, v);
+            } catch (UnsatisfiedLinkError ignored) {
+            }
+            rotaryAcc += Math.abs(v);
+            if (rotaryAcc > 24f) {
+                rotaryAcc = 0;
+                getWindow().getDecorView().performHapticFeedback(android.view.HapticFeedbackConstants.CLOCK_TICK);
+            }
+            return true;
+        }
+        return super.dispatchGenericMotionEvent(e);
+    }
+
+    @Override
+    public boolean dispatchKeyEvent(android.view.KeyEvent e) {
+        if (e.getKeyCode() == android.view.KeyEvent.KEYCODE_BACK) {
+            if (e.getAction() == android.view.KeyEvent.ACTION_UP && !e.isCanceled()) {
+                try {
+                    nativeInput(1, 0f);
+                } catch (UnsatisfiedLinkError ignored) {
+                    finish();
+                }
+            }
+            return true;
+        }
+        return super.dispatchKeyEvent(e);
+    }
+
+    /** The app has nothing further back to go to: leave (the watch face is next). */
+    public void exitApp() {
+        runOnUiThread(this::finish);
+    }
 
     /** While the pointer is used the screen may turn off: a foreground service keeps the process and the sensors going. */
     public void keepAlive(boolean enable) {

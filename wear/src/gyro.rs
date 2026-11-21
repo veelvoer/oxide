@@ -79,6 +79,10 @@ impl OneEuro {
         1.0 / (1.0 + tau / dt)
     }
 
+    pub fn clear(&mut self) {
+        self.prev = None;
+    }
+
     pub fn reset(&mut self, x: f32, now: Instant) {
         self.prev = Some((x, 0.0, now));
     }
@@ -136,7 +140,14 @@ impl Gyro {
             let mut pos = (0.5f32, 0.5f32);
             let mut last: Option<(f32, f32)> = None;
             let mut sent = (-1.0f32, -1.0f32);
+            // the pointer's own filter (after a pinch took it back), and the filters of the arm's angles
             let (mut fx, mut fy) = (OneEuro::new(1.4, 14.0), OneEuro::new(1.4, 14.0));
+            let (mut fyaw, mut fpitch) = (OneEuro::new(0.9, 4.0), OneEuro::new(0.9, 4.0));
+            let mut yaw_u = 0.0f32;
+            let mut last_raw_yaw: Option<f32> = None;
+            let mut last_f: Option<(f32, f32, Instant)> = None;
+            // mouse mode: the smoothed movement
+            let mut smooth_mv = (0.0f32, 0.0f32);
             // the last 400 ms of where the pointer was (pointing) and of the moves made (mouse mode), to take a pinch back
             let mut hist: VecDeque<(Instant, (f32, f32))> = VecDeque::new();
             let mut moves: VecDeque<(Instant, (f32, f32))> = VecDeque::new();
@@ -240,13 +251,35 @@ impl Gyro {
                     shared.arm_up.store(up, Ordering::Relaxed);
                     if !up || hold {
                         last = None;
+                        last_f = None;
+                        last_raw_yaw = None;
+                        fyaw.clear();
+                        fpitch.clear();
                         continue;
                     }
-                    if let Some(prev) = last {
-                        pos = point_step(pos, prev, (yaw, pitch), &c);
+                    // the yaw runs on without the jump at north; both angles are filtered (steady when slow, quick when fast)
+                    yaw_u = match last_raw_yaw {
+                        Some(l) => {
+                            let mut d = yaw - l;
+                            while d > PI {
+                                d -= 2.0 * PI;
+                            }
+                            while d < -PI {
+                                d += 2.0 * PI;
+                            }
+                            yaw_u + d
+                        }
+                        None => yaw,
+                    };
+                    last_raw_yaw = Some(yaw);
+                    let (ay, ap) = (fyaw.filter(yaw_u, now), fpitch.filter(pitch, now));
+                    if let Some((py, pp, pt)) = last_f {
+                        let dt = now.saturating_duration_since(pt).as_secs_f32().max(0.002);
+                        pos = point_step(pos, (py, pp), (ay, ap), dt, &c);
                     }
-                    last = Some((yaw, pitch));
-                    let out = (fx.filter(pos.0, now), fy.filter(pos.1, now));
+                    last_f = Some((ay, ap, now));
+                    last = Some((ay, ap));
+                    let out = pos;
                     hist.push_back((now, out));
                     while hist.front().is_some_and(|(t, _)| now.duration_since(*t) > Duration::from_millis(400)) {
                         hist.pop_front();
@@ -259,7 +292,7 @@ impl Gyro {
                     if hold {
                         continue;
                     }
-                    const K: f32 = 2600.0;
+                    const K: f32 = 1700.0;
                     let (mut dx, mut dy) = (-m.yaw * K * c.speed, -m.pitch * K * c.speed);
                     if c.invert_x {
                         dx = -dx;
@@ -267,7 +300,12 @@ impl Gyro {
                     if c.invert_y {
                         dy = -dy;
                     }
-                    if dx.abs() > 0.15 || dy.abs() > 0.15 {
+                    // a little smoothing, and a gain that grows with the speed: slow = precise, fast = far
+                    smooth_mv = (smooth_mv.0 + (dx - smooth_mv.0) * 0.45, smooth_mv.1 + (dy - smooth_mv.1) * 0.45);
+                    let speed = (smooth_mv.0.hypot(smooth_mv.1)) * 120.0;
+                    let g = 0.6 + 0.9 * crate::round::smooth(speed / 900.0);
+                    let (dx, dy) = (smooth_mv.0 * g, smooth_mv.1 * g);
+                    if dx.abs() > 0.08 || dy.abs() > 0.08 {
                         moves.push_back((now, (dx, dy)));
                         while moves.front().is_some_and(|(t, _)| now.duration_since(*t) > Duration::from_millis(400)) {
                             moves.pop_front();
@@ -289,9 +327,10 @@ impl Gyro {
     }
 }
 
-/// The pointer's new place when the arm turned from `prev` to `now` (yaw, pitch in radians): fractions of the screen.
-/// About 22 degrees of the hand's travel cross the whole screen at speed 1.
-pub fn point_step(pos: (f32, f32), prev: (f32, f32), now: (f32, f32), c: &GyroCfg) -> (f32, f32) {
+/// The pointer's new place when the arm turned from `prev` to `now` (yaw, pitch in radians, within `dt` seconds): fractions of
+/// the screen. About 34 degrees of the hand's travel cross the whole screen at speed 1, but slowly moved it travels less
+/// (precise) and quickly moved it travels more (far), and the tiniest tremor does not move it at all.
+pub fn point_step(pos: (f32, f32), prev: (f32, f32), now: (f32, f32), dt: f32, c: &GyroCfg) -> (f32, f32) {
     let mut dyaw = now.0 - prev.0;
     while dyaw > PI {
         dyaw -= 2.0 * PI;
@@ -299,8 +338,14 @@ pub fn point_step(pos: (f32, f32), prev: (f32, f32), now: (f32, f32), c: &GyroCf
     while dyaw < -PI {
         dyaw += 2.0 * PI;
     }
-    let range = deg(22.0) / c.speed;
-    let (mut dx, mut dy) = (dyaw / (2.0 * range), -(now.1 - prev.1) / (2.0 * range * 0.62));
+    let dpitch = now.1 - prev.1;
+    if dyaw.abs() < 0.0003 && dpitch.abs() < 0.0003 {
+        return pos;
+    }
+    let speed = dyaw.hypot(dpitch) / dt.max(0.001);
+    let gain = 0.6 + 0.8 * crate::round::smooth(speed / 1.5);
+    let range = deg(34.0) / c.speed;
+    let (mut dx, mut dy) = (dyaw / (2.0 * range) * gain, -dpitch / (2.0 * range * 0.62) * gain);
     if c.invert_x {
         dx = -dx;
     }
@@ -320,21 +365,34 @@ mod tests {
 
     #[test]
     fn turning_right_moves_the_pointer_right() {
-        let (x, y) = point_step((0.5, 0.5), (0.0, 0.0), (deg(11.0), 0.0), &cfg());
-        assert!((x - 0.75).abs() < 1e-3 && (y - 0.5).abs() < 1e-3);
+        let (x, y) = point_step((0.5, 0.5), (0.0, 0.0), (deg(5.0), 0.0), 0.5, &cfg());
+        assert!(x > 0.5 && (y - 0.5).abs() < 1e-6);
+    }
+
+    #[test]
+    fn slow_is_precise_and_fast_goes_far() {
+        // the same turn, slowly and quickly
+        let slow = point_step((0.5, 0.5), (0.0, 0.0), (deg(3.0), 0.0), 2.0, &cfg()).0 - 0.5;
+        let fast = point_step((0.5, 0.5), (0.0, 0.0), (deg(3.0), 0.0), 0.02, &cfg()).0 - 0.5;
+        assert!(fast > slow * 1.8, "slow {slow} fast {fast}");
+    }
+
+    #[test]
+    fn a_tremor_does_not_move_it() {
+        assert_eq!(point_step((0.5, 0.5), (0.0, 0.0), (0.0002, -0.0002), 0.01, &cfg()), (0.5, 0.5));
     }
 
     #[test]
     fn the_wrap_around_north_is_not_a_jump() {
-        let (x, _) = point_step((0.5, 0.5), (PI - 0.01, 0.0), (-PI + 0.01, 0.0), &cfg());
+        let (x, _) = point_step((0.5, 0.5), (PI - 0.01, 0.0), (-PI + 0.01, 0.0), 0.05, &cfg());
         assert!(x > 0.5 && x < 0.53);
     }
 
     #[test]
     fn raising_the_hand_moves_the_pointer_up_and_it_stops_at_the_edge() {
-        let (_, y) = point_step((0.5, 0.5), (0.0, 0.0), (0.0, deg(5.0)), &cfg());
+        let (_, y) = point_step((0.5, 0.5), (0.0, 0.0), (0.0, deg(5.0)), 0.5, &cfg());
         assert!(y < 0.5);
-        let (x, _) = point_step((0.95, 0.5), (0.0, 0.0), (deg(40.0), 0.0), &cfg());
+        let (x, _) = point_step((0.95, 0.5), (0.0, 0.0), (deg(60.0), 0.0), 0.5, &cfg());
         assert_eq!(x, 1.0);
     }
 

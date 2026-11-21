@@ -10,6 +10,7 @@ pub mod theme;
 pub mod app;
 pub mod calib;
 pub mod icon_metrics;
+pub mod input;
 pub mod gyro;
 pub mod link;
 pub mod motion;

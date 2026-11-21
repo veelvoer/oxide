@@ -1,7 +1,8 @@
 // Workspaces. Oxide has unlimited ones; only those with windows (and the current one) exist.
 // options: style "numbers" | "dots" | "buttons" | "bars" | "scroll" | "stretch"
 //          count (how many entries show at once, bars/scroll/stretch)   showEmpty (bool)
-//          highlightDelay (ms the highlight takes to follow a switch; 0 = it follows at once)
+//          highlightDelay (ms the highlight waits before it starts to follow a switch; 0 = it starts at once)
+//          highlightSpeed (ms the highlight takes to get there; 0 = it jumps)
 //
 // numbers: plain digits with an underline under the current one    dots: dots, the current one wide with a glow
 // buttons: filled pills with the digit                              bars: a carousel of ticks around the current one
@@ -17,8 +18,9 @@ Item {
     readonly property string kind: ["numbers", "dots", "buttons", "bars", "scroll", "stretch"].indexOf(opts.style) >= 0 ? opts.style : "numbers"
     readonly property bool carousel: kind === "bars" || kind === "scroll" || kind === "stretch"
     readonly property bool showEmpty: opts.showEmpty === true
-    // the time the highlight takes to follow a switch; 0 = at once
-    readonly property int hl: Math.max(0, opts.highlightDelay !== undefined ? opts.highlightDelay : 380) * Theme.motionScale
+    // the highlight follows a switch after `hlWait` ms and takes `hl` ms to get there (two different things: 0 and 0 = at once)
+    readonly property int hlWait: Math.max(0, opts.highlightDelay !== undefined ? opts.highlightDelay : 0) * Theme.motionScale
+    readonly property int hl: Math.max(0, opts.highlightSpeed !== undefined ? opts.highlightSpeed : 380) * Theme.motionScale
     readonly property int slots: Math.max(2, Math.min(12, opts.count !== undefined ? opts.count : 5))
     readonly property real unit: 1
 
@@ -39,12 +41,12 @@ Item {
 
     // ------------------------------------------------------------ the position everything follows
     property real pos: 0
-    Behavior on pos { NumberAnimation { duration: root.hl; easing.type: Easing.OutCubic } }
+    Behavior on pos { SequentialAnimation { PauseAnimation { duration: root.hlWait } NumberAnimation { duration: root.hl; easing.type: Easing.OutCubic } } }
     // stretch: the head of the ring leads and the tail follows, so the ring stretches while it moves
     property real head: 0
     property real tail: 0
-    Behavior on head { NumberAnimation { duration: root.hl * 0.63; easing.type: Easing.OutCubic } }
-    Behavior on tail { NumberAnimation { duration: root.hl * 1.2; easing.type: Easing.OutCubic } }
+    Behavior on head { SequentialAnimation { PauseAnimation { duration: root.hlWait } NumberAnimation { duration: root.hl * 0.63; easing.type: Easing.OutCubic } } }
+    Behavior on tail { SequentialAnimation { PauseAnimation { duration: root.hlWait } NumberAnimation { duration: root.hl * 1.2; easing.type: Easing.OutCubic } } }
     onActiveChanged: { pos = active; head = active; tail = active; }
     Component.onCompleted: { pos = active; head = active; tail = active; Qt.callLater(refreshCurrent); }
 
@@ -172,7 +174,7 @@ Item {
                 height: 26
                 // the current one is wider (dots: a pill), the others small
                 width: root.kind === "dots" ? (current ? 24 : 12) : (current ? 30 : 26)
-                Behavior on width { NumberAnimation { duration: root.hl * 0.7; easing.type: Easing.OutCubic } }
+                Behavior on width { SequentialAnimation { PauseAnimation { duration: root.hlWait } NumberAnimation { duration: root.hl * 0.7; easing.type: Easing.OutCubic } } }
                 // arriving workspaces pop in
                 opacity: 0
                 Component.onCompleted: opacity = 1
@@ -191,7 +193,7 @@ Item {
                     anchors.centerIn: parent
                     text: ws.modelData.special ? "S" : ws.modelData.id
                     color: root.kind === "buttons" ? (ws.current ? Theme.ink : (ws.occupied ? Theme.text : Theme.muted)) : (ws.current ? Theme.accent : (ws.occupied ? Theme.text : Theme.muted))
-                    Behavior on color { ColorAnimation { duration: root.hl * 0.6 } }
+                    Behavior on color { SequentialAnimation { PauseAnimation { duration: root.hlWait } ColorAnimation { duration: root.hl * 0.6 } } }
                     font { family: Theme.mono; pixelSize: 13; weight: ws.current ? Font.Bold : Font.Normal }
                 }
                 // numbers: the underline grows under the current one
@@ -201,7 +203,7 @@ Item {
                     anchors.horizontalCenter: parent.horizontalCenter
                     height: 2; radius: 1; color: Theme.accent
                     width: ws.current ? parent.width - 8 : 0
-                    Behavior on width { NumberAnimation { duration: root.hl * 0.6; easing.type: Easing.OutCubic } }
+                    Behavior on width { SequentialAnimation { PauseAnimation { duration: root.hlWait } NumberAnimation { duration: root.hl * 0.6; easing.type: Easing.OutCubic } } }
                 }
                 // dots: a dot that rests in its own color; the current one is the glowing pill (the marker)
                 Rectangle {
@@ -228,8 +230,8 @@ Item {
         height: root.kind === "buttons" ? 26 : 8
         radius: root.kind === "buttons" ? Math.min(Theme.rControl, height / 2) : height / 2
         color: Theme.accent
-        Behavior on x { NumberAnimation { duration: root.hl; easing.type: Easing.OutCubic } }
-        Behavior on width { NumberAnimation { duration: root.hl; easing.type: Easing.OutCubic } }
+        Behavior on x { SequentialAnimation { PauseAnimation { duration: root.hlWait } NumberAnimation { duration: root.hl; easing.type: Easing.OutCubic } } }
+        Behavior on width { SequentialAnimation { PauseAnimation { duration: root.hlWait } NumberAnimation { duration: root.hl; easing.type: Easing.OutCubic } } }
     }
     WheelHandler { onWheel: e => OxideState.dispatch({ "type": "workspace_existing", "arg": e.angleDelta.y < 0 ? 1 : -1 }) }
 }

@@ -53,7 +53,8 @@ const DEFS: &[Def] = &[
         Opt::Choice("style", "Look", &[("numbers", "Numbers"), ("dots", "Dots"), ("buttons", "Buttons"), ("bars", "Bars"), ("scroll", "Scroll"), ("stretch", "Stretch")], "numbers"),
         Opt::Int("count", "Shown at once (bars, scroll, stretch)", 2, 12, 5),
         Opt::Bool("showEmpty", "Show empty workspaces", false),
-        Opt::Int("highlightDelay", "Highlight delay (ms, 0 = at once)", 0, 1500, 380),
+        Opt::Int("highlightDelay", "Highlight delay (ms before it starts, 0 = at once)", 0, 1500, 0),
+        Opt::Int("highlightSpeed", "Highlight speed (ms it takes, 0 = jumps)", 0, 1500, 380),
     ] },
     Def { id: "window", label: "Window title", icon: "application-outline", about: "Title of the focused window.", opts: &[
         Opt::Bool("showIcon", "Show app icon", true),

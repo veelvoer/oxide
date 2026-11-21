@@ -2,6 +2,13 @@
 
 ## 0.2.0 (unreleased)
 
+* The workspace highlight has two settings again: *delay* (ms before it starts, 0 = at once) and *speed* (ms it takes, 0 = jumps).
+* Watch: a proper Wear OS app: the touch bezel scrolls lists (volume on the controls page, the mouse wheel on the touchpad
+  page), the back button goes back and closes the app from the first screen, the system's swipe-to-dismiss is off so the app
+  keeps its place (a swipe from the left edge goes back inside the app).
+* Watch: the gyro pointer is smoother and less sensitive (filtered angles, slow = precise, fast = far, no tremor), and goes on
+  with the screen off in battery saver (wake-up sensors; Setup > Cursor > Screen off asks Android to allow it).
+
 * New: **presets** (Settings > Presets, `oxide-ctl preset`): every setting under a name, with an automatic undo; and **GitHub
   sign-in** (device flow or the GitHub CLI) to keep presets and setup in a private gist. The assistant's API key never
   goes into a preset or to GitHub. See docs/PRESETS.md.

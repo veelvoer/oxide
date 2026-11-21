@@ -140,6 +140,8 @@ pub struct App {
     test_pinches: u32,
     /// the strongest recent tap, fading (the sensitivity meter)
     meter: f32,
+    /// the bezel's turn in this frame
+    rot: f32,
     gyro_ok: bool,
     /// the scroll position of each list screen
     scroll: std::collections::HashMap<&'static str, Scroller>,
@@ -172,6 +174,10 @@ impl App {
         let token = Arc::new(Mutex::new(set.token.clone()));
         let name = platform::device_name().map(|n| format!("{n} (watch)")).unwrap_or_else(|| "Watch".into());
         let wake_ctx = ctx.clone();
+        {
+            let c = ctx.clone();
+            crate::input::set_repaint(move || c.request_repaint());
+        }
         let link = link::start(name, token.clone(), set.phone_addr.clone(), move || wake_ctx.request_repaint());
         let mut a = Self {
             ctx: ctx.clone(),
@@ -198,6 +204,7 @@ impl App {
             gyro_live: true,
             test_pinches: 0,
             meter: 0.0,
+            rot: 0.0,
             gyro_ok: motion::has_gyro(),
             scroll: Default::default(),
             fps: (Instant::now(), 0),
