@@ -142,6 +142,11 @@ pub struct App {
     meter: f32,
     /// the bezel's turn in this frame
     rot: f32,
+    /// the last time a finger, the bezel or a key touched the watch
+    last_touch: Instant,
+    /// the screen is black while the gyro mouse works
+    dark: bool,
+    screen_held: bool,
     gyro_ok: bool,
     /// the scroll position of each list screen
     scroll: std::collections::HashMap<&'static str, Scroller>,
@@ -205,6 +210,9 @@ impl App {
             test_pinches: 0,
             meter: 0.0,
             rot: 0.0,
+            last_touch: Instant::now(),
+            dark: false,
+            screen_held: false,
             gyro_ok: motion::has_gyro(),
             scroll: Default::default(),
             fps: (Instant::now(), 0),

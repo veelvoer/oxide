@@ -60,6 +60,10 @@ mod imp {
         crate::platform::haptic(kind);
     }
 
+    pub fn screen_brightness(level: f32) {
+        call(|env, a| env.call_method(a, "screenBrightness", "(F)V", &[JValue::Float(level)]).map(|_| ()));
+    }
+
     pub fn battery_exempt() -> bool {
         call(|env, a| env.call_method(a, "batteryExempt", "()Z", &[])?.z()).unwrap_or(false)
     }
@@ -104,6 +108,7 @@ mod imp {
     pub fn exit_app() {
         std::process::exit(0);
     }
+    pub fn screen_brightness(_: f32) {}
     pub fn battery_exempt() -> bool {
         true
     }

@@ -2,6 +2,10 @@
 
 ## 0.2.0 (unreleased)
 
+* Watch: the bezel and the back button really work now (winit dropped the bezel's scroll events and swallowed the back key:
+  a patched winit in `vendor/winit-wear` forwards them), with ticks under the finger and a scroll arc on the rim like Hearth.
+* Watch: with the gyro mouse the screen stays on but black (keep-screen-on, brightness 0) so battery saver cannot freeze it.
+
 * The workspace highlight has two settings again: *delay* (ms before it starts, 0 = at once) and *speed* (ms it takes, 0 = jumps).
 * Watch: a proper Wear OS app: the touch bezel scrolls lists (volume on the controls page, the mouse wheel on the touchpad
   page), the back button goes back and closes the app from the first screen, the system's swipe-to-dismiss is off so the app

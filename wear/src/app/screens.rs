@@ -36,8 +36,14 @@ impl App {
             self.last_pos = Some(p);
         }
         // the watch's own controls: the bezel scrolls, back goes back (Escape does on a computer)
-        self.rot = crate::input::take_rotary();
-        if crate::input::take_back() || ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
+        // the bezel (winit turns it into scroll events) and the mouse wheel: positive = clockwise = the content goes up
+        self.rot = crate::input::take_rotary() - ctx.input(|i| i.smooth_scroll_delta.y);
+        let touched = ctx.input(|i| i.pointer.any_down() || i.pointer.any_released() || i.pointer.delta().length() > 0.0) || self.rot != 0.0;
+        if touched {
+            self.last_touch = Instant::now();
+            self.dark = false;
+        }
+        if crate::input::take_back() || ctx.input(|i| i.key_pressed(egui::Key::Escape) || i.key_pressed(egui::Key::BrowserBack)) {
             self.go_back();
             return;
         }
@@ -61,6 +67,29 @@ impl App {
             self.gyro.start(self.link.tx.clone(), move || wake_ctx.request_repaint());
         } else {
             self.gyro.stop();
+        }
+        // the screen while pointing: it stays on (so Android keeps the app and its sensors going, battery saver or not) but goes
+        // black after a few seconds, which an OLED screen draws for free
+        let pointing = want && on_pc && self.gyro.running();
+        let stay = pointing && self.set.screen != "sleep";
+        if stay != self.screen_held {
+            self.screen_held = stay;
+            platform::keep_screen_on(stay);
+            motion::screen_brightness(if stay && self.set.screen == "dark" { 0.0 } else { -1.0 });
+        }
+        if pointing && self.set.screen == "dark" {
+            if self.last_touch.elapsed() > Duration::from_secs(6) {
+                self.dark = true;
+            } else {
+                ctx.request_repaint_after(Duration::from_millis(1000));
+            }
+        } else {
+            self.dark = false;
+        }
+        if self.dark {
+            // nothing drawn: black
+            ui.painter().rect_filled(full, 0, Color32::BLACK);
+            return;
         }
         match self.page {
             Page::Home => self.home(ui, geo, full),
@@ -338,6 +367,10 @@ impl App {
         acts.push(Act::None);
         if gyro {
             // battery saver and Samsung's sleeping apps stop apps with the screen off: "unrestricted" lets the pointer go on
+            cells.push(Cell::Choice { options: vec!["Dark".into(), "On".into(), "Sleep".into()], selected: match self.set.screen.as_str() { "on" => 1, "sleep" => 2, _ => 0 } });
+            acts.push(Act::Option("screen", 0));
+            cells.push(Cell::Note("Screen while pointing: dark = black, but awake (it keeps the pointer going in battery saver)".into()));
+            acts.push(Act::None);
             let exempt = motion::battery_exempt();
             cells.push(Cell::Row { icon: ic::POWER, title: "Screen off".into(), sub: if exempt { "Keeps working".into() } else { "Tap: allow in battery saver".into() }, caret: !exempt });
             acts.push(if exempt { Act::None } else { Act::Run("battery") });
@@ -439,6 +472,7 @@ impl App {
                 }
             }
             "pinch_count" => self.set.pinch_count = !self.set.pinch_count,
+            "screen" => self.set.screen = ["dark", "on", "sleep"][zone.min(2)].into(),
             "pinch_level" => {
                 if zone == 1 {
                     self.set.pinch_level = (self.set.pinch_level - 1.0).max(3.0);
@@ -730,7 +764,7 @@ impl App {
         let p = pal();
         let ctx = ui.ctx().clone();
         // the rotary bezel (or a two-finger scroll) sets the volume
-        let scroll = ctx.input(|i| i.smooth_scroll_delta.y) + self.rot;
+        let scroll = self.rot;
         if scroll.abs() > 0.5 {
             let mut set = None;
             if let Some(l) = self.live.as_mut() {

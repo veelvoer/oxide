@@ -302,6 +302,26 @@ public class WatchActivity extends OxideActivity implements SensorEventListener 
         return super.dispatchKeyEvent(e);
     }
 
+    @Override
+    public void haptic(int kind) {
+        if (kind == 3) clockTick();
+        else super.haptic(kind);
+    }
+
+    /** The tick of a watch's crown or bezel. */
+    public void clockTick() {
+        runOnUiThread(() -> getWindow().getDecorView().performHapticFeedback(android.view.HapticFeedbackConstants.CLOCK_TICK));
+    }
+
+    /** The screen's brightness for this window: 0 = as dark as it goes, negative = the system's own. */
+    public void screenBrightness(float level) {
+        runOnUiThread(() -> {
+            android.view.WindowManager.LayoutParams lp = getWindow().getAttributes();
+            lp.screenBrightness = level < 0 ? android.view.WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE : Math.max(0f, level);
+            getWindow().setAttributes(lp);
+        });
+    }
+
     /** The app has nothing further back to go to: leave (the watch face is next). */
     public void exitApp() {
         runOnUiThread(this::finish);

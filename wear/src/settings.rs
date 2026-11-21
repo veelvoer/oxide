@@ -16,6 +16,9 @@ pub struct Settings {
     pub gyro_mode: String,
     /// worn on the right wrist (the arm points the other way along the watch)
     pub right_wrist: bool,
+    /// the screen while the gyro mouse is used: "dark" (stays on but black after a few seconds: nothing for Android to put to
+    /// sleep or to freeze, and an OLED draws nothing), "on" (as it is) or "sleep" (the watch decides)
+    pub screen: String,
     /// pointer speed, 0.5 to 3
     pub speed: f32,
     pub invert_x: bool,
@@ -49,7 +52,7 @@ pub const ACCENTS: [(&str, u32); 8] = [
 
 impl Default for Settings {
     fn default() -> Self {
-        Self { theme: "watch".into(), accent: 0, cursor: "pad".into(), gyro_mode: "point".into(), right_wrist: false, speed: 1.0, invert_x: false, invert_y: false, pinch: true, pinch_count: false, pinch_level: 7.0, auto_update: true, token: String::new(), phone_addr: String::new(), dir: PathBuf::new() }
+        Self { theme: "watch".into(), accent: 0, cursor: "pad".into(), gyro_mode: "point".into(), right_wrist: false, screen: "dark".into(), speed: 1.0, invert_x: false, invert_y: false, pinch: true, pinch_count: false, pinch_level: 7.0, auto_update: true, token: String::new(), phone_addr: String::new(), dir: PathBuf::new() }
     }
 }
 

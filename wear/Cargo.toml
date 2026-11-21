@@ -1,6 +1,6 @@
 [package]
 name = "oxide-watch-app"
-version = "0.6.0"
+version = "0.7.0"
 edition = "2021"
 license = "GPL-3.0-or-later"
 description = "Oxide Remote for Wear OS: touchpad, gyro mouse, controls and stats for your PCs on your wrist"
@@ -40,3 +40,7 @@ lto = "fat"
 codegen-units = 1
 strip = true
 panic = "unwind"
+
+# winit forgets the rotary bezel (ACTION_SCROLL): the copy in ../vendor/winit-wear turns it into mouse-wheel events
+[patch.crates-io]
+winit = { path = "../vendor/winit-wear" }

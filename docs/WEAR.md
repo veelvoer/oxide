@@ -15,6 +15,12 @@ PCs and passes everything on. A watch on Wi-Fi drains its battery; Bluetooth to 
 
 The PCs are the ones paired with the phone: nothing to pair on the watch.
 
+## Screen while pointing
+
+With the gyro mouse the screen stays awake but goes black after 6 seconds (Setup > Cursor > *Screen while pointing*: Dark /
+On / Sleep). Android keeps the app and its sensors running then, also in battery saver, and an OLED draws nothing for black.
+Touch the watch to see the screen again. *Sleep* lets the watch turn the screen off by itself.
+
 ## Wear OS controls
 
 The touch bezel scrolls lists, sets the volume on the controls page and is the mouse wheel on the touchpad page. The back

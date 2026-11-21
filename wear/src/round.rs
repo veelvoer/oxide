@@ -127,6 +127,10 @@ pub struct Scroller {
     claimed: bool,
     last_y: f32,
     moved: f32,
+    /// when the content last moved (the scroll arc shows for a moment after)
+    moved_at: Option<Instant>,
+    /// the bezel's travel since the last tick of the haptics
+    ticks: f32,
 }
 
 impl Scroller {
@@ -135,6 +139,13 @@ impl Scroller {
         if turn != 0.0 {
             self.off += turn;
             self.vel = 0.0;
+            self.moved_at = Some(Instant::now());
+            // a small tick under the finger for every few clicks of the bezel, as the system's lists give
+            self.ticks += turn.abs();
+            if self.ticks > 26.0 {
+                self.ticks = 0.0;
+                crate::platform::haptic(3);
+            }
         }
     }
 
@@ -180,6 +191,7 @@ pub fn list(ui: &mut Ui, geo: Geo, area: Rect, sc: &mut Scroller, cells: &[Cell]
     let content = top_pad + heights.iter().sum::<f32>() + gap * cells.len().saturating_sub(1) as f32 + bottom_pad;
     let max_off = (content - area.height()).max(0.0);
 
+    let off_before = sc.off;
     // ---- input
     let (pressed, down, released, pos, scroll) = ctx.input(|i| (i.pointer.primary_pressed(), i.pointer.primary_down(), i.pointer.primary_released(), i.pointer.latest_pos(), i.smooth_scroll_delta.y));
     let dt = ctx.input(|i| i.stable_dt).clamp(0.001, 0.05);
@@ -220,12 +232,8 @@ pub fn list(ui: &mut Ui, geo: Geo, area: Rect, sc: &mut Scroller, cells: &[Cell]
         }
         sc.claimed = false;
     }
-    // the rotary bezel (and a mouse wheel)
-    if scroll.abs() > 0.1 {
-        sc.off -= scroll;
-        sc.vel = 0.0;
-        ctx.request_repaint();
-    }
+    // the rotary bezel and the mouse wheel arrive through `Scroller::nudge` (the app reads them once per frame)
+    let _ = scroll;
     // momentum and the soft stop
     if !down {
         if sc.off < 0.0 || sc.off > max_off {
@@ -246,6 +254,9 @@ pub fn list(ui: &mut Ui, geo: Geo, area: Rect, sc: &mut Scroller, cells: &[Cell]
         }
     }
 
+    if (sc.off - off_before).abs() > 0.01 || sc.claimed {
+        sc.moved_at = Some(Instant::now());
+    }
     // ---- draw
     let mut y = area.top() + top_pad - sc.off;
     let mut hit = None;
@@ -270,7 +281,24 @@ pub fn list(ui: &mut Ui, geo: Geo, area: Rect, sc: &mut Scroller, cells: &[Cell]
         }
         y += h + gap;
     }
+    // the scroll arc: a thin arc on the right rim, how long the list is and where you are in it; shows while scrolling
+    if max_off > 1.0 {
+        if let Some(t) = sc.moved_at.map(|t| t.elapsed().as_secs_f32()).filter(|t| *t < 1.4) {
+            let alpha = if t < 0.9 { 1.0 } else { 1.0 - (t - 0.9) / 0.5 };
+            let (a0, a1) = (deg_to_rad(-34.0), deg_to_rad(34.0));
+            let view = (area.height() / content).clamp(0.12, 1.0);
+            let pos = (sc.off / max_off).clamp(0.0, 1.0);
+            let (t0, t1) = (a0 + (a1 - a0) * pos * (1.0 - view), a0 + (a1 - a0) * (pos * (1.0 - view) + view));
+            arc(ui, geo.c, geo.r - 5.0, a0, a1, Stroke::new(3.0, a(p.text, 0.12 * alpha)));
+            arc(ui, geo.c, geo.r - 5.0, t0, t1, Stroke::new(3.0, a(p.text, 0.55 * alpha)));
+            ctx.request_repaint();
+        }
+    }
     hit
+}
+
+fn deg_to_rad(d: f32) -> f32 {
+    d * std::f32::consts::PI / 180.0
 }
 
 fn a(c: Color32, alpha: f32) -> Color32 {
