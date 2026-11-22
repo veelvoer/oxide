@@ -185,7 +185,7 @@ fn background_card(ui: &mut Ui) {
             "Photos are real pictures. Logo is the Oxide tiles in your palette.",
             mode == "photo",
             &mut mode,
-            &[("photo".to_string(), "Photo"), ("theme".to_string(), "Logo"), ("image".to_string(), "Picture"), ("color".to_string(), "Color")],
+            &[("photo".to_string(), "Photo"), ("theme".to_string(), "Logo"), ("image".to_string(), "Picture"), ("slideshow".to_string(), "Slideshow"), ("color".to_string(), "Color")],
         );
         v["mode"] = serde_json::json!(mode);
         if mode == "photo" {
@@ -196,6 +196,19 @@ fn background_card(ui: &mut Ui) {
             let mut path = v["path"].as_str().unwrap_or("").to_string();
             text_row(ui, "Picture", "Full path to a jpg or png.", false, &mut path, "/home/you/Pictures/wall.jpg");
             v["path"] = serde_json::json!(path);
+            let mut fit = v["fit"].as_str().unwrap_or("fill").to_string();
+            choice_row(ui, "Fit", "", true, &mut fit, &[("fill".to_string(), "Fill"), ("fit".to_string(), "Fit"), ("center".to_string(), "Center")]);
+            v["fit"] = serde_json::json!(fit);
+        } else if mode == "slideshow" {
+            let mut folder = v["folder"].as_str().unwrap_or("").to_string();
+            text_row(ui, "Folder", "The jpg and png pictures in it take turns.", false, &mut folder, "/home/you/Pictures/walls");
+            v["folder"] = serde_json::json!(folder);
+            let mut every = v["interval"].as_u64().unwrap_or(600).to_string();
+            choice_row(ui, "Change every", "", false, &mut every, &[("60".to_string(), "1 min"), ("600".to_string(), "10 min"), ("3600".to_string(), "1 hour"), ("21600".to_string(), "6 hours")]);
+            v["interval"] = serde_json::json!(every.parse::<u64>().unwrap_or(600));
+            let mut shuffle = v["shuffle"].as_bool().unwrap_or(false);
+            toggle_row(ui, "Shuffle", "", false, &mut shuffle);
+            v["shuffle"] = serde_json::json!(shuffle);
             let mut fit = v["fit"].as_str().unwrap_or("fill").to_string();
             choice_row(ui, "Fit", "", true, &mut fit, &[("fill".to_string(), "Fill"), ("fit".to_string(), "Fit"), ("center".to_string(), "Center")]);
             v["fit"] = serde_json::json!(fit);

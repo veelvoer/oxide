@@ -15,6 +15,9 @@ fi
 install -m755 "$T/oxide" "$T/oxide-ctl" "$T/oxide-settings" "$T/oxide-ai" "$T/oxide-remoted" contrib/oxide-session "$HOME/.local/bin/"
 rm -rf "$HOME/.local/share/oxide/shells/oxide"
 cp -r contrib/shells/oxide "$HOME/.local/share/oxide/shells/oxide"
+# Oxide's own QML module (`import Oxide`)
+rm -rf "$HOME/.local/share/oxide/qml/Oxide"; mkdir -p "$HOME/.local/share/oxide/qml"
+cp -r contrib/qml/Oxide "$HOME/.local/share/oxide/qml/Oxide"
 cp -r contrib/wallpapers/. "$HOME/.local/share/oxide/wallpapers/"
 # the settings app shows up in app launchers like any other app
 install -Dm644 contrib/oxide-settings.desktop "$HOME/.local/share/applications/oxide-settings.desktop"

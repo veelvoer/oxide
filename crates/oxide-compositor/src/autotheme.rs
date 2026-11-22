@@ -86,7 +86,7 @@ impl Oxide {
         let Some(out) = self.monitors.first().map(|m| m.output.clone()) else { return };
         let Some(mode) = out.current_mode() else { return };
         let has_bg = smithay::desktop::layer_map_for_output(&out).layers().any(|l| l.layer() == smithay::wayland::shell::wlr_layer::Layer::Background);
-        if !has_bg {
+        if !has_bg && !self.native_wallpaper() {
             return;
         }
         let region = Rectangle::<i32, Physical>::new((0, 0).into(), mode.size);

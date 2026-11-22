@@ -1,5 +1,6 @@
 // Memory in use.
 import QtQuick
+import Oxide
 
 Row {
     property var opts: ({})

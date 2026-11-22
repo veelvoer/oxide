@@ -1,7 +1,5 @@
 singleton Theme Theme.qml
 singleton BarConfig BarConfig.qml
-singleton OxideState OxideState.qml
-singleton Sys Sys.qml
 Txt Txt.qml
 Icon Icon.qml
 IconButton IconButton.qml

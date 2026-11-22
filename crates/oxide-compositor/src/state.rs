@@ -209,6 +209,8 @@ pub struct Oxide {
     pub config_error: Option<oxide_ipc::ConfigProblem>,
     pub whats_new: Option<oxide_ipc::WhatsNew>,
     pub config_mtime: Option<std::time::SystemTime>,
+    /// Oxide's own wallpaper engine (drawn under everything while the bundled shell runs)
+    pub wallpaper: Option<crate::wallpaper::Wallpaper>,
     /// Super is down with no other key pressed since (the ambient HUD shows)
     pub super_held: bool,
     pub super_down: Option<std::time::Instant>,
@@ -378,6 +380,7 @@ impl Oxide {
             config_error: None,
             whats_new: None,
             config_mtime: None,
+            wallpaper: None,
             super_held: false,
             super_down: None,
             super_combo: false,
@@ -614,6 +617,7 @@ impl Oxide {
     pub fn startup(&mut self) {
         self.auto_theme_start();
         self.config_watch_start();
+        self.wallpaper_watch_start();
         self.telemetry_start();
         self.sync_remote();
         self.updates_start();

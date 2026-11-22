@@ -13,6 +13,7 @@ oxide-config = { path = "../oxide-config" }
 oxide-ipc = { path = "../oxide-ipc" }
 oxide-layout = { path = "../oxide-layout" }
 serde_json.workspace = true
+image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 xcursor = "0.3"

@@ -15,6 +15,7 @@
 import Quickshell
 import Quickshell.Io
 import QtQuick
+import Oxide
 
 ShellRoot {
     id: root

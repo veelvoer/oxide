@@ -92,7 +92,7 @@ impl Oxide {
 
         if self.sampling_bg {
             let layer_map = layer_map_for_output(output);
-            return layer_map
+            let mut els: Vec<OxideElement> = layer_map
                 .layers()
                 .rev()
                 .filter(|l| l.layer() == Layer::Background)
@@ -100,6 +100,8 @@ impl Oxide {
                 .flat_map(|(loc, l)| AsRenderElements::<GlesRenderer>::render_elements::<Surf>(l, renderer, loc.to_physical_precise_round(scale), scale, 1.0))
                 .map(OxideElement::from)
                 .collect();
+            self.wallpaper_elements(renderer, output, geo, &mut els);
+            return els;
         }
 
         self.cursor_elements(renderer, output, geo, scale, &mut out);
@@ -127,6 +129,7 @@ impl Oxide {
                     .flat_map(|(loc, l)| AsRenderElements::<GlesRenderer>::render_elements::<Surf>(l, renderer, loc.to_physical_precise_round(scale), scale, 1.0))
                     .map(OxideElement::from),
             );
+            self.wallpaper_elements(renderer, output, geo, &mut out);
             return out;
         }
 
@@ -201,7 +204,40 @@ impl Oxide {
         let _ = fullscreen;
 
         out.extend(lower);
+        self.wallpaper_elements(renderer, output, geo, &mut out);
         out
+    }
+
+    /// Oxide's own wallpaper, the lowest thing on the output (while the bundled shell runs; the other shells bring their own).
+    pub fn wallpaper_elements(&mut self, renderer: &mut GlesRenderer, output: &Output, geo: Rectangle<i32, Logical>, out: &mut Vec<OxideElement>) {
+        if !self.native_wallpaper() {
+            return;
+        }
+        let Some(mode) = output.current_mode() else { return };
+        let bg = oxide_config::parse_color(&oxide_config::theme::palette(&self.config.theme).bg).map_or([17, 17, 26], |c| [(c[0] * 255.0) as u8, (c[1] * 255.0) as u8, (c[2] * 255.0) as u8]);
+        let w = self.wallpaper.get_or_insert_with(crate::wallpaper::Wallpaper::new);
+        w.elements(renderer, &output.name(), (mode.size.w as u32, mode.size.h as u32), (geo.size.w, geo.size.h), bg, out);
+        if w.fading() {
+            self.dirty = true;
+        }
+    }
+
+    /// The bundled shell draws no wallpaper of its own: the compositor does.
+    pub fn native_wallpaper(&self) -> bool {
+        self.config.default_shell_active()
+    }
+
+    pub fn wallpaper_watch_start(&mut self) {
+        let _ = self.loop_handle.insert_source(smithay::reexports::calloop::timer::Timer::from_duration(std::time::Duration::from_millis(250)), |_, _, state| {
+            if state.native_wallpaper() {
+                if let Some(w) = state.wallpaper.as_mut() {
+                    if w.poll() {
+                        state.dirty = true;
+                    }
+                }
+            }
+            smithay::reexports::calloop::timer::TimeoutAction::ToDuration(std::time::Duration::from_millis(250))
+        });
     }
 
     /// Refresh the blurred background of `output` if any visible window wants blur.

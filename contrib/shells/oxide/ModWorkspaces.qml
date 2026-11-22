@@ -10,6 +10,7 @@
 // The carousels are driven by one smoothly moving position, so a switch glides and can be interrupted at any moment.
 import Quickshell
 import QtQuick
+import Oxide
 
 Item {
     id: root

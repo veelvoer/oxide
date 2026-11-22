@@ -2,6 +2,16 @@
 
 ## 0.2.0 (unreleased)
 
+* Oxide's own wallpaper engine: the compositor draws the wallpaper itself (photo, picture, color, theme, and a new slideshow of
+  a folder with an interval and shuffle), cross-fading between pictures, scaled once to each screen. The shell no longer opens
+  a wallpaper window of its own (other shells and compositors still get the old one).
+* Oxide's own QML module: `import Oxide` gives any Quickshell config `OxideState` (workspaces, windows, focus, outputs, profile,
+  dispatch) and `Sys`, like Quickshell.Hyprland does for Hyprland. Installed to ~/.local/share/oxide/qml; the shell finds it
+  through QML_IMPORT_PATH. See docs/QML.md.
+* Settings: every row has the same height, icon column and control height; sliders, switches, fields and choices line up on
+  one edge, and corners use one radius.
+* Phone: icons are centered by eye (each glyph's ink, not its box); the settings page asks Android for permissions once a second
+  instead of every frame (the app could say it was not responding).
 * Fixed (watch): the app "did not open": opened again from the launcher it showed the PC it was left on, and after 6 s the dark
   pointer screen. Leaving the app with a lit screen now ends the pointer, and opening it shows the first screen. Java could not
   reach the app's native methods (NativeActivity opens the library on its own): the library is loaded the usual way too.

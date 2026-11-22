@@ -2,6 +2,7 @@
 // "This window" acts now; "Always" is remembered for every window of the app (a rule in the config).
 import Quickshell
 import QtQuick
+import Oxide
 
 Pop {
     id: root

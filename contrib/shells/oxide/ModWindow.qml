@@ -1,5 +1,6 @@
 // Title of the focused window; click opens its options. options: showIcon (bool), maxWidth (px)
 import QtQuick
+import Oxide
 
 Item {
     id: root

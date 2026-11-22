@@ -6,6 +6,7 @@ import Quickshell.Services.Mpris
 import Quickshell.Bluetooth
 import Quickshell.Networking
 import QtQuick
+import Oxide
 
 Pop {
     id: root

@@ -1,6 +1,7 @@
 // Wi-Fi, Bluetooth, volume and battery icons in one button; click opens quick settings, wheel changes volume.
 // options: wifi, bluetooth, volume, battery, batteryPercent (all default on)
 import QtQuick
+import Oxide
 
 Rectangle {
     id: root

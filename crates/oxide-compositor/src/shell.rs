@@ -69,8 +69,16 @@ impl Oxide {
                 std::fs::create_dir_all(&d).ok()?;
                 OpenOptions::new().create(true).append(true).open(d.join("shell.log")).ok()
             });
+        // Oxide's own QML module (`import Oxide`) is found through the import path
+        let mut imports: Vec<std::path::PathBuf> = oxide_config::qml_dirs().into_iter().filter(|d| d.is_dir()).collect();
+        if let Some(old) = std::env::var_os("QML_IMPORT_PATH") {
+            imports.extend(std::env::split_paths(&old));
+        }
         let mut cmd = Command::new("quickshell");
-        cmd.arg("-p").arg(&link).env("WAYLAND_DISPLAY", &self.socket_name).stdin(Stdio::null());
+        if let Ok(p) = std::env::join_paths(imports) {
+            cmd.env("QML_IMPORT_PATH", p);
+        }
+        cmd.arg("-p").arg(&link).env("WAYLAND_DISPLAY", &self.socket_name).env("OXIDE_WALLPAPER", "native").stdin(Stdio::null());
         match log {
             Some(f) => {
                 cmd.stdout(f.try_clone().map(Stdio::from).unwrap_or_else(|_| Stdio::null())).stderr(Stdio::from(f));

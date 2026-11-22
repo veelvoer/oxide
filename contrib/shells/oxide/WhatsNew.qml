@@ -2,6 +2,7 @@
 import Quickshell
 import Quickshell.Wayland
 import QtQuick
+import Oxide
 
 PanelWindow {
     id: win

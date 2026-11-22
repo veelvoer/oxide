@@ -3,6 +3,7 @@ mod autotheme;
 mod confwatch;
 mod power;
 mod updates;
+mod wallpaper;
 mod groups;
 mod overview;
 mod telemetry;

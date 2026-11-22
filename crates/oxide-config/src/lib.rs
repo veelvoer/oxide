@@ -78,6 +78,12 @@ pub fn wallpaper_dirs() -> Vec<std::path::PathBuf> {
     vec![data.join("oxide/wallpapers"), "/usr/local/share/oxide/wallpapers".into(), "/usr/share/oxide/wallpapers".into()]
 }
 
+/// Where Oxide's own QML modules live (`import Oxide`), most personal first.
+pub fn qml_dirs() -> Vec<std::path::PathBuf> {
+    let data = std::env::var_os("XDG_DATA_HOME").map(std::path::PathBuf::from).or_else(|| std::env::var_os("HOME").map(|h| std::path::PathBuf::from(h).join(".local/share"))).unwrap_or_default();
+    vec![data.join("oxide/qml"), "/usr/local/share/oxide/qml".into(), "/usr/share/oxide/qml".into()]
+}
+
 /// Names (file stems) of the photos you can pick, without duplicates.
 pub fn wallpaper_names() -> Vec<String> {
     let mut v: Vec<String> = vec![];

@@ -1,5 +1,6 @@
 // Now playing (any MPRIS player). Click toggles play/pause. Hidden when nothing plays. options: maxWidth
 import QtQuick
+import Oxide
 
 Row {
     id: root

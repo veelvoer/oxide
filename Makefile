@@ -24,6 +24,8 @@ install:
 	install -m755 contrib/oxide-session $(DESTDIR)$(PREFIX)/bin/oxide-session
 	install -d $(DESTDIR)$(PREFIX)/share/oxide/shells $(DESTDIR)$(PREFIX)/share/oxide/wallpapers
 	cp -r contrib/shells/oxide $(DESTDIR)$(PREFIX)/share/oxide/shells/
+	install -d $(DESTDIR)$(PREFIX)/share/oxide/qml
+	cp -r contrib/qml/Oxide $(DESTDIR)$(PREFIX)/share/oxide/qml/
 	cp -r contrib/wallpapers/. $(DESTDIR)$(PREFIX)/share/oxide/wallpapers/
 	install -Dm644 contrib/oxide.desktop $(DESTDIR)$(PREFIX)/share/wayland-sessions/oxide.desktop
 	install -Dm644 contrib/oxide-settings.desktop $(DESTDIR)$(PREFIX)/share/applications/oxide-settings.desktop

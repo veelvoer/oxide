@@ -28,12 +28,16 @@ Scope {
         onLoaded: { try { root.opts = JSON.parse(text()); } catch (e) { root.opts = ({}); } }
     }
 
+    // the compositor draws the wallpaper itself (its own engine: crossfade, slideshow); this window is for other compositors
+    readonly property bool nativeDraw: Quickshell.env("OXIDE_WALLPAPER") === "native"
+
     Variants {
         model: Quickshell.screens
         PanelWindow {
             id: win
             required property var modelData
             screen: modelData
+            visible: !root.nativeDraw
             color: Theme.bg
             anchors { top: true; bottom: true; left: true; right: true }
             exclusionMode: ExclusionMode.Ignore

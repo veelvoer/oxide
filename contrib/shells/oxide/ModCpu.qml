@@ -1,5 +1,6 @@
 // CPU load.
 import QtQuick
+import Oxide
 
 Row {
     property var opts: ({})
