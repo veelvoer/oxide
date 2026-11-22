@@ -8,6 +8,7 @@ use std::sync::{
 /// the bezel's turns since the last look, as the bits of an f32 (positive = clockwise, content moves up)
 static ROTARY: AtomicU32 = AtomicU32::new(0);
 static BACK: AtomicBool = AtomicBool::new(false);
+static REOPENED: AtomicBool = AtomicBool::new(false);
 type Repaint = Arc<dyn Fn() + Send + Sync>;
 static REPAINT: Mutex<Option<Repaint>> = Mutex::new(None);
 
@@ -39,6 +40,16 @@ pub fn push_back() {
     wake();
 }
 
+pub fn push_reopened() {
+    REOPENED.store(true, Ordering::SeqCst);
+    wake();
+}
+
+/// The app was opened again from the launcher (it was running already) since the last call.
+pub fn take_reopened() -> bool {
+    REOPENED.swap(false, Ordering::SeqCst)
+}
+
 /// The bezel's movement since the last call.
 pub fn take_rotary() -> f32 {
     f32::from_bits(ROTARY.swap(0, Ordering::SeqCst))
@@ -56,6 +67,7 @@ pub extern "system" fn Java_dev_oxide_remote_WatchActivity_nativeInput(_env: jni
     match kind {
         0 => push_rotary(value),
         1 => push_back(),
+        2 => push_reopened(),
         _ => {}
     }
 }

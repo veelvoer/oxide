@@ -406,12 +406,13 @@ fn draw_cell(ui: &Ui, cell: &Cell, rect: Rect, alpha: f32, pressed: bool, p: Pal
         Cell::Pc { name, sub, dot, wake_accent } => {
             ui.painter().rect_filled(r, pill, card);
             self::icon(ui, Pos2::new(r.left() + 24.0, r.center().y), "\u{E32E}", 20.0, accent);
-            ui.painter().circle_filled(Pos2::new(r.left() + 35.0, r.center().y + 9.0), 4.0, a(*dot, alpha));
             // a narrow cell (near the rim) has no room for the wake button
             let wide = r.width() > radius * 1.5;
             let max_w = r.width() - 46.0 - if wide { 52.0 } else { 14.0 };
             fit_text(ui, Pos2::new(r.left() + 46.0, r.center().y - 8.0), Align2::LEFT_CENTER, name, medium(13.5), ink, max_w);
-            fit_text(ui, Pos2::new(r.left() + 46.0, r.center().y + 9.0), Align2::LEFT_CENTER, sub, FontId::proportional(10.5), muted, max_w);
+            // the state: its dot sits in front of the words, on their line (not on the icon)
+            ui.painter().circle_filled(Pos2::new(r.left() + 49.5, r.center().y + 9.0), 3.5, a(*dot, alpha));
+            fit_text(ui, Pos2::new(r.left() + 59.0, r.center().y + 9.0), Align2::LEFT_CENTER, sub, FontId::proportional(10.5), muted, max_w - 13.0);
             if wide {
                 let wc = Pos2::new(r.right() - 26.0, r.center().y);
                 ui.painter().circle_filled(wc, 18.0, a(p.raised, alpha));

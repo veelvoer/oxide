@@ -2,6 +2,11 @@
 
 ## 0.2.0 (unreleased)
 
+* Fixed (watch): the app "did not open": opened again from the launcher it showed the PC it was left on, and after 6 s the dark
+  pointer screen. Leaving the app with a lit screen now ends the pointer, and opening it shows the first screen. Java could not
+  reach the app's native methods (NativeActivity opens the library on its own): the library is loaded the usual way too.
+* Watch: the PC state dot sits in front of its words, not on the icon.
+
 * Fixed: Steam (and every other X11 program started from the shell or the launcher) said "Unable to open a connection to X":
   the shell and the autostart programs were started before XWayland was ready, so they had no DISPLAY. They now wait for
   XWayland (3 s at most), and D-Bus-activated programs get DISPLAY too.

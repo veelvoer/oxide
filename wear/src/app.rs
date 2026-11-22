@@ -146,6 +146,7 @@ pub struct App {
     last_touch: Instant,
     /// the screen is black while the gyro mouse works
     dark: bool,
+    last_frame: Instant,
     screen_held: bool,
     gyro_ok: bool,
     /// the scroll position of each list screen
@@ -212,6 +213,7 @@ impl App {
             rot: 0.0,
             last_touch: Instant::now(),
             dark: false,
+            last_frame: Instant::now(),
             screen_held: false,
             gyro_ok: motion::has_gyro(),
             scroll: Default::default(),

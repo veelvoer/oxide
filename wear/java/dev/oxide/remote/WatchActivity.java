@@ -264,6 +264,15 @@ public class WatchActivity extends OxideActivity implements SensorEventListener 
     public void onAccuracyChanged(Sensor s, int accuracy) {}
 
     // ---- the watch's own controls: the touch bezel scrolls, the back button goes back (the app decides what back means)
+    // NativeActivity opens the library by itself, which does not let Java find native methods in it: load it the usual way too
+    // (the same file, so the same instance)
+    static {
+        try {
+            System.loadLibrary("oxide_remote_watch");
+        } catch (Throwable ignored) {
+        }
+    }
+
     private static native void nativeInput(int kind, float value);
 
     private float rotaryAcc = 0;
@@ -300,6 +309,16 @@ public class WatchActivity extends OxideActivity implements SensorEventListener 
             return true;
         }
         return super.dispatchKeyEvent(e);
+    }
+
+    /** The app was opened again from the launcher while it was already running: it shows the first screen, not where it was. */
+    @Override
+    protected void onNewIntent(android.content.Intent intent) {
+        super.onNewIntent(intent);
+        try {
+            nativeInput(2, 0f);
+        } catch (UnsatisfiedLinkError ignored) {
+        }
     }
 
     @Override
@@ -347,11 +366,34 @@ public class WatchActivity extends OxideActivity implements SensorEventListener 
         return on;
     }
 
+    private boolean userLeft = false;
+
     @Override
     protected void onPause() {
-        // with the service the sensors stay on while the screen is off; without it they stop
-        if (on && !keepAlive) motion(false, pinchOn, pinchLevel, absolute, armSign);
+        // Left by the user (Home, another app, a dialog) while the screen was lit: the pointer stops with the app. The screen
+        // turning off is not leaving: with the keep-alive service the sensors go on then.
+        android.os.PowerManager pm = (android.os.PowerManager) getSystemService(Context.POWER_SERVICE);
+        userLeft = pm != null && pm.isInteractive();
+        if (userLeft) {
+            keepAlive(false);
+            if (on) motion(false, pinchOn, pinchLevel, absolute, armSign);
+        } else if (on && !keepAlive) {
+            motion(false, pinchOn, pinchLevel, absolute, armSign);
+        }
         super.onPause();
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        if (userLeft) {
+            // opened again: the first screen, with the screen lit (not the PC it was left on, and black)
+            userLeft = false;
+            try {
+                nativeInput(2, 0f);
+            } catch (UnsatisfiedLinkError ignored) {
+            }
+        }
     }
 
     @Override

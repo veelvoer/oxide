@@ -35,6 +35,20 @@ impl App {
         if let Some(p) = ctx.input(|i| i.pointer.latest_pos()) {
             self.last_pos = Some(p);
         }
+        // opened again from the launcher: the first screen with the screen lit, not the PC it was left on (and black)
+        let gap = self.last_frame.elapsed();
+        self.last_frame = Instant::now();
+        if crate::input::take_reopened() {
+            if matches!(self.page, Page::Pc(_)) {
+                self.leave_pc();
+            }
+            self.page = Page::Home;
+            self.dark = false;
+            self.last_touch = Instant::now();
+        } else if gap > Duration::from_secs(2) && !self.dark {
+            // the screen was off a while (the loop slept): it is lit again, give it time before it may go dark
+            self.last_touch = Instant::now();
+        }
         // the watch's own controls: the bezel scrolls, back goes back (Escape does on a computer)
         // the bezel (winit turns it into scroll events) and the mouse wheel: positive = clockwise = the content goes up
         self.rot = crate::input::take_rotary() - ctx.input(|i| i.smooth_scroll_delta.y);
