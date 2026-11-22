@@ -58,7 +58,8 @@ pub fn auto_icon(name: &str) -> &'static str {
             return v;
         }
     }
-    ""
+    // every row has an icon: the words start at the same place everywhere
+    "tune-variant"
 }
 
 /// Page title: plain text, left aligned. The icon argument is kept for callers but not drawn.
@@ -161,8 +162,8 @@ fn plain_card<R>(ui: &mut Ui, title: &str, body: impl FnOnce(&mut Ui) -> R) -> R
     egui::Frame::new()
         .fill(if ex { CARD_HOVER() } else { CARD() })
         .stroke(if ex { Stroke::NONE } else { Stroke::new(1.0, BORDER()) })
-        .corner_radius(if ex { egui::CornerRadius::same(20) } else { radius(8) })
-        .inner_margin(egui::Margin::symmetric(if ex { 18 } else { 14 }, 2))
+        .corner_radius(if ex { egui::CornerRadius::same(20) } else { radius(12) })
+        .inner_margin(egui::Margin::symmetric(if ex { 18 } else { 14 }, 4))
         .show(ui, |ui| {
             ui.set_width(ui.available_width());
             ui.spacing_mut().item_spacing.y = 0.0;
@@ -174,39 +175,49 @@ fn plain_card<R>(ui: &mut Ui, title: &str, body: impl FnOnce(&mut Ui) -> R) -> R
 /// One setting row: icon tile, name (and optional status line) on the left, control on the right.
 /// `tip` is shown when hovering the row, so the page stays clean.
 pub fn row_full(ui: &mut Ui, icon: Option<&str>, name: &str, sub: &str, tip: &str, last: bool, control: impl FnOnce(&mut Ui)) {
-    let min_h = if sub.is_empty() { 44.0 } else { 52.0 };
-    let r = ui.horizontal(|ui| {
-        ui.set_min_height(min_h);
-        if !name.is_empty() {
-            let icon = icon.unwrap_or_else(|| auto_icon(name));
-            ui.vertical(|ui| {
-                ui.add_space((min_h - 22.0) / 2.0);
-                if icon.is_empty() {
-                    ui.add_space(22.0);
-                } else {
-                    icon_tile(ui, icon, 22.0);
-                }
-            });
-            ui.add_space(2.0);
-            ui.vertical(|ui| {
-                ui.add_space(if sub.is_empty() { 11.0 } else { 8.0 });
-                ui.label(name);
-                if !sub.is_empty() {
-                    ui.label(RichText::new(sub).small().color(MUTED()));
-                }
-            });
+    // every row has the same height and everything in it is centered on one line: icon, words and control
+    let h = if sub.is_empty() { ROW_H } else { ROW_SUB_H };
+    let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), h), Sense::hover());
+    if !name.is_empty() {
+        let icon = icon.unwrap_or_else(|| auto_icon(name));
+        // the icon is centered in the row; the words are centered on it too (one line, or two with the status line under)
+        if !icon.is_empty() {
+            let mut left = ui.new_child(egui::UiBuilder::new().max_rect(rect).layout(Layout::left_to_right(Align::Center)));
+            icon_tile(&mut left, icon, 22.0);
         }
-        ui.with_layout(Layout::right_to_left(Align::Center), control);
-    });
+        let body = egui::TextStyle::Body.resolve(ui.style());
+        let small = egui::TextStyle::Small.resolve(ui.style());
+        let g_name = ui.painter().layout_no_wrap(name.to_string(), body, TEXT());
+        let g_sub = (!sub.is_empty()).then(|| ui.painter().layout_no_wrap(sub.to_string(), small, MUTED()));
+        let total = g_name.size().y + g_sub.as_ref().map_or(0.0, |g| 2.0 + g.size().y);
+        let x = rect.left() + 34.0;
+        let mut y = rect.center().y - total / 2.0;
+        let name_h = g_name.size().y;
+        ui.painter().galley(Pos2::new(x, y), g_name, TEXT());
+        y += name_h + 2.0;
+        if let Some(g) = g_sub {
+            ui.painter().galley(Pos2::new(x, y), g, MUTED());
+        }
+    }
+    let mut right = ui.new_child(egui::UiBuilder::new().max_rect(rect).layout(Layout::right_to_left(Align::Center)));
+    right.spacing_mut().item_spacing.x = 10.0;
+    right.spacing_mut().interact_size.y = CONTROL_H;
+    control(&mut right);
     if !tip.is_empty() {
-        r.response.on_hover_text(tip);
+        resp.on_hover_text(tip);
     }
     if !last {
-        let y = ui.cursor().top();
-        let x = ui.max_rect().x_range();
-        ui.painter().hline(x, y, Stroke::new(1.0, BORDER()));
+        let y = rect.bottom();
+        ui.painter().hline(rect.x_range(), y, Stroke::new(1.0, BORDER()));
     }
 }
+
+/// The height of a row, of a row with a second line, and of the controls in it (fields, buttons, swatches).
+pub const ROW_H: f32 = 46.0;
+pub const ROW_SUB_H: f32 = 56.0;
+pub const CONTROL_H: f32 = 30.0;
+/// The number next to a slider: always this wide, so all of them end at the same line.
+const NUMBER_W: f32 = 68.0;
 
 /// Setting row; `help` appears as a tooltip.
 pub fn row(ui: &mut Ui, name: &str, help: &str, last: bool, control: impl FnOnce(&mut Ui)) {
@@ -324,7 +335,7 @@ fn number<N: egui::emath::Numeric>(ui: &mut Ui, value: &mut N, range: std::ops::
     if !N::INTEGRAL && hi - lo <= 2.0 {
         d = d.fixed_decimals(2);
     }
-    ui.add(d)
+    ui.add_sized([NUMBER_W, CONTROL_H], d)
 }
 
 /// A slider track in the Material 3 expressive style: a thick rounded track that stops with a small gap on both
@@ -332,7 +343,9 @@ fn number<N: egui::emath::Numeric>(ui: &mut Ui, value: &mut N, range: std::ops::
 pub fn track<N: egui::emath::Numeric>(ui: &mut Ui, value: &mut N, range: std::ops::RangeInclusive<N>, width: f32) -> egui::Response {
     let (lo, hi) = (range.start().to_f64(), range.end().to_f64());
     let (rect, mut resp) = ui.allocate_exact_size(vec2(width, 28.0), Sense::click_and_drag());
-    let inner = rect.shrink2(vec2(3.0, 0.0));
+    // the track runs to both ends of its rectangle (so it ends on the same line as every other control); the handle's centre
+    // stays 2 px inside
+    let inner = rect.shrink2(vec2(2.0, 0.0));
     if let Some(p) = resp.interact_pointer_pos().filter(|_| resp.dragged() || resp.clicked() || resp.is_pointer_button_down_on()) {
         let t = ((p.x - inner.left()) / inner.width()).clamp(0.0, 1.0) as f64;
         let mut v = lo + t * (hi - lo);
@@ -362,14 +375,12 @@ pub fn track<N: egui::emath::Numeric>(ui: &mut Ui, value: &mut N, range: std::op
     let p = ui.painter();
     // filled part up to the handle, the rest after it
     if x - gap > inner.left() + 1.0 {
-        let a = Rect::from_min_max(Pos2::new(inner.left(), cy - th / 2.0), Pos2::new(x - gap, cy + th / 2.0));
+        let a = Rect::from_min_max(Pos2::new(rect.left(), cy - th / 2.0), Pos2::new(x - gap, cy + th / 2.0));
         p.rect_filled(a, egui::CornerRadius { nw: 4, sw: 4, ne: 2, se: 2 }, ACCENT());
     }
     if x + gap < inner.right() - 1.0 {
-        let b = Rect::from_min_max(Pos2::new(x + gap, cy - th / 2.0), Pos2::new(inner.right(), cy + th / 2.0));
+        let b = Rect::from_min_max(Pos2::new(x + gap, cy - th / 2.0), Pos2::new(rect.right(), cy + th / 2.0));
         p.rect_filled(b, egui::CornerRadius { nw: 2, sw: 2, ne: 4, se: 4 }, lerp_color(FIELD(), MUTED(), 0.35));
-        // the end stop
-        p.circle_filled(Pos2::new(inner.right() - 4.0, cy), 1.6, ACCENT().gamma_multiply(0.8));
     }
     let hw = 4.0 - grow * 1.0;
     let hh = 24.0 + grow * 2.0;
@@ -382,7 +393,7 @@ pub fn track<N: egui::emath::Numeric>(ui: &mut Ui, value: &mut N, range: std::op
 
 pub fn text_row(ui: &mut Ui, name: &str, help: &str, last: bool, value: &mut String, hint: &str) {
     row(ui, name, help, last, |ui| {
-        ui.add(egui::TextEdit::singleline(value).desired_width(200.0).hint_text(hint.to_string()));
+        ui.add_sized([200.0, CONTROL_H], egui::TextEdit::singleline(value).vertical_align(Align::Center).hint_text(hint.to_string()));
     });
 }
 
@@ -407,14 +418,16 @@ pub fn choice_row<T: PartialEq + Clone>(
             return;
         }
         // segmented control in a dark inset; laid out right to left, so reversed
-        egui::Frame::new().fill(DEEP()).stroke(Stroke::new(1.0, BORDER())).corner_radius(radius(8)).inner_margin(egui::Margin::same(3)).show(ui, |ui| {
+        egui::Frame::new().fill(DEEP()).stroke(Stroke::new(1.0, BORDER())).corner_radius(radius(8)).inner_margin(egui::Margin::same(2)).show(ui, |ui| {
             ui.spacing_mut().item_spacing.x = 2.0;
+            ui.spacing_mut().interact_size.y = CONTROL_H - 6.0;
             for (opt, label) in options.iter().rev() {
                 let selected = value == opt;
                 let btn = egui::Button::new(RichText::new(*label).color(if selected { ON_ACCENT() } else { MUTED() }))
                     .fill(if selected { ACCENT() } else { egui::Color32::TRANSPARENT })
                     .stroke(Stroke::NONE)
-                    .corner_radius(radius(6));
+                    .min_size(vec2(0.0, CONTROL_H - 6.0))
+                    .corner_radius(radius(8));
                 if ui.add(btn).clicked() {
                     *value = opt.clone();
                 }
@@ -427,10 +440,11 @@ pub fn choice_row<T: PartialEq + Clone>(
 pub fn color_row(ui: &mut Ui, name: &str, help: &str, last: bool, value: &mut String, alpha: bool) {
     row(ui, name, help, last, |ui| {
         let mut text = value.clone();
-        if ui.add(egui::TextEdit::singleline(&mut text).font(egui::TextStyle::Monospace).desired_width(if alpha { 112.0 } else { 92.0 }).clip_text(false)).changed() {
+        if ui.add_sized([if alpha { 112.0 } else { 96.0 }, CONTROL_H], egui::TextEdit::singleline(&mut text).font(egui::TextStyle::Monospace).vertical_align(Align::Center).clip_text(false)).changed() {
             *value = text;
         }
         let mut c = parse_hex(value);
+        ui.spacing_mut().interact_size = vec2(CONTROL_H + 8.0, CONTROL_H);
         let changed = if alpha {
             ui.color_edit_button_srgba(&mut c).changed()
         } else {

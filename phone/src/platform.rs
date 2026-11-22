@@ -57,8 +57,23 @@ mod imp {
         call(|env, a| env.call_method(a, "isDark", "()Z", &[])?.z())
     }
 
+    /// Settings pages ask every frame; the answers come from system services (binder), so look once a second.
+    fn cached(slot: &std::sync::Mutex<Option<(std::time::Instant, i32)>>, ask: impl FnOnce() -> i32) -> i32 {
+        let mut g = slot.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some((t, v)) = *g {
+            if t.elapsed() < std::time::Duration::from_secs(1) {
+                return v;
+            }
+        }
+        let v = ask();
+        *g = Some((std::time::Instant::now(), v));
+        v
+    }
+    static SHOW_SLOT: std::sync::Mutex<Option<(std::time::Instant, i32)>> = std::sync::Mutex::new(None);
+    static BRIDGE_SLOT: std::sync::Mutex<Option<(std::time::Instant, i32)>> = std::sync::Mutex::new(None);
+
     pub fn can_show_on_pc() -> bool {
-        call(|env, a| env.call_method(a, "canShowOnPc", "()Z", &[])?.z()).unwrap_or(false)
+        cached(&SHOW_SLOT, || call(|env, a| env.call_method(a, "canShowOnPc", "()Z", &[])?.z()).unwrap_or(false) as i32) != 0
     }
 
     pub fn set_show_on_pc(on: bool) -> bool {
@@ -67,11 +82,12 @@ mod imp {
 
     /// The watch connection: 0 off, 1 on, 2 waiting for the Bluetooth permission, 3 no Bluetooth.
     pub fn watch_bridge(on: bool) -> i32 {
+        *BRIDGE_SLOT.lock().unwrap_or_else(|e| e.into_inner()) = None;
         call(|env, a| env.call_method(a, "watchBridge", "(Z)I", &[JValue::Bool(on as u8)])?.i()).unwrap_or(0)
     }
 
     pub fn watch_bridge_state() -> i32 {
-        call(|env, a| env.call_method(a, "watchBridgeState", "()I", &[])?.i()).unwrap_or(0)
+        cached(&BRIDGE_SLOT, || call(|env, a| env.call_method(a, "watchBridgeState", "()I", &[])?.i()).unwrap_or(0))
     }
 
     pub fn device_name() -> Option<String> {

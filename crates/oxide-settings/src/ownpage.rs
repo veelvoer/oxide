@@ -154,7 +154,7 @@ pub fn page(app: &mut App, ui: &mut Ui) {
                     let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
                     let exists = path.exists();
                     let text = if exists { name } else { format!("{name} (new)") };
-                    if ui.add(egui::Button::new(RichText::new(text).size(13.0)).fill(FIELD()).corner_radius(radius(4))).on_hover_text(path.display().to_string()).clicked() {
+                    if ui.add(egui::Button::new(RichText::new(text).size(13.0)).fill(FIELD()).corner_radius(radius(8))).on_hover_text(path.display().to_string()).clicked() {
                         open = Some((path.clone(), readonly));
                     }
                 }

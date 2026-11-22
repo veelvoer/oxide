@@ -104,7 +104,7 @@ impl Editor {
                 let label = format!("{}{}", d.name(), if d.dirty() { "  *" } else { "" });
                 let btn = egui::Button::new(RichText::new(label).color(if sel { ON_ACCENT() } else { TEXT() }).family(if sel { medium() } else { egui::FontFamily::Proportional }))
                     .fill(if sel { ACCENT() } else { FIELD() })
-                    .corner_radius(radius(4));
+                    .corner_radius(radius(8));
                 let r = ui.add(btn).on_hover_text(d.path.display().to_string());
                 if r.clicked() {
                     self.current = i;

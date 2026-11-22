@@ -81,7 +81,11 @@ pub fn tap(r: &Response) -> bool {
 
 /// An icon glyph centered at `c`.
 pub fn icon_at(ui: &Ui, c: Pos2, glyph: &str, size: f32, color: Color32, fill: bool) {
-    ui.painter().text(c, Align2::CENTER_CENTER, glyph, icon_font(size, fill), color);
+    // the eye centers the ink, not the glyph's box: every icon has its own offset
+    let cp = glyph.chars().next().map_or(0, |c| c as u32);
+    let table = if fill { crate::icon_metrics::ICON_OFFSETS_FILL } else { crate::icon_metrics::ICON_OFFSETS };
+    let (ox, oy) = table.iter().find(|(k, _, _)| *k == cp).map_or((0.0, 0.0), |(_, x, y)| (*x, *y));
+    ui.painter().text(c - vec2(ox, oy) * size, Align2::CENTER_CENTER, glyph, icon_font(size, fill), color);
 }
 
 /// Just an icon, as a label.

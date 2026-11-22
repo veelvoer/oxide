@@ -286,7 +286,7 @@ fn preview_and_lanes(ui: &mut Ui, st: &mut State) {
             let zone_w = ui.available_width();
             let mut rects: Vec<Rect> = Vec::new();
             let (inner, dropped) = ui.dnd_drop_zone::<Src, ()>(
-                egui::Frame::new().fill(BG()).stroke(Stroke::new(1.0, if dragging { ACCENT().gamma_multiply(0.6) } else { BORDER() })).corner_radius(radius(6)).inner_margin(egui::Margin::same(6)),
+                egui::Frame::new().fill(BG()).stroke(Stroke::new(1.0, if dragging { ACCENT().gamma_multiply(0.6) } else { BORDER() })).corner_radius(radius(8)).inner_margin(egui::Margin::same(6)),
                 |ui| {
                     ui.set_width(zone_w - 14.0);
                     ui.set_min_height(32.0);
@@ -415,13 +415,13 @@ fn selected_panel(ui: &mut Ui, st: &mut State) {
     let mut shift: i32 = 0;
     card(ui, d.label, |ui| {
         row_full(ui, None, "", d.about, "", d.opts.is_empty(), |ui| {
-            if ui.add(egui::Button::new(RichText::new("Remove").color(BAD())).fill(FIELD()).corner_radius(radius(4))).clicked() {
+            if ui.add(egui::Button::new(RichText::new("Remove").color(BAD())).fill(FIELD()).corner_radius(radius(8))).clicked() {
                 remove = true;
             }
-            if ui.add(egui::Button::new("Move right").fill(FIELD()).corner_radius(radius(4))).clicked() {
+            if ui.add(egui::Button::new("Move right").fill(FIELD()).corner_radius(radius(8))).clicked() {
                 shift = 1;
             }
-            if ui.add(egui::Button::new("Move left").fill(FIELD()).corner_radius(radius(4))).clicked() {
+            if ui.add(egui::Button::new("Move left").fill(FIELD()).corner_radius(radius(8))).clicked() {
                 shift = -1;
             }
         });

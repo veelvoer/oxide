@@ -1,6 +1,7 @@
 //! Oxide Remote for Android (and a desktop build for testing).
 pub mod app;
 pub mod bridge;
+pub mod icon_metrics;
 pub mod jstream;
 pub mod net;
 pub mod platform;

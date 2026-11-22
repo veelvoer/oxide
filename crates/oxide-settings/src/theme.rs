@@ -242,7 +242,7 @@ pub fn apply(ctx: &Context) {
     let w = &mut v.widgets;
     for s in [&mut w.noninteractive, &mut w.inactive, &mut w.hovered, &mut w.active, &mut w.open] {
         // Expressive: every button and field is a pill
-        s.corner_radius = if expressive() { egui::CornerRadius::same(255) } else { radius(4) };
+        s.corner_radius = if expressive() { egui::CornerRadius::same(255) } else { radius(8) };
     }
     w.noninteractive.bg_stroke = Stroke::new(1.0, BORDER());
     w.inactive.bg_fill = FIELD();
@@ -259,7 +259,7 @@ pub fn apply(ctx: &Context) {
     ctx.all_styles_mut(|style| {
         style.spacing.item_spacing = egui::vec2(10.0, 8.0);
         style.spacing.button_padding = egui::vec2(12.0, 5.0);
-        style.spacing.interact_size.y = 28.0;
+        style.spacing.interact_size.y = 30.0;
         style.spacing.slider_width = 200.0;
         style.spacing.slider_rail_height = 3.0;
         style.animation_time = 0.12;

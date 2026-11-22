@@ -33,15 +33,19 @@ pub fn appearance(app: &mut App, ui: &mut Ui) {
         gradient_strip(ui, &cols, 18.0);
         ui.add_space(8.0);
         let mut remove = None;
-        for (i, c) in g.active_border.iter_mut().enumerate() {
-            ui.horizontal(|ui| {
+        let n = g.active_border.len();
+        for i in 0..n {
+            let last_color = i + 1 == n && !adv;
+            row(ui, &format!("Color {}", i + 1), "", last_color, |ui| {
+                if adv && n > 1 && ghost_button(ui, "Remove").clicked() {
+                    remove = Some(i);
+                }
+                let c = &mut g.active_border[i];
+                ui.add_sized([112.0, CONTROL_H], egui::TextEdit::singleline(c).font(egui::TextStyle::Monospace).vertical_align(egui::Align::Center));
                 let mut col = parse_hex(c);
+                ui.spacing_mut().interact_size = egui::vec2(CONTROL_H + 8.0, CONTROL_H);
                 if ui.color_edit_button_srgba(&mut col).changed() {
                     *c = to_hex(col, true);
-                }
-                ui.add(egui::TextEdit::singleline(c).desired_width(110.0));
-                if adv && cols.len() > 1 && ghost_button(ui, "Remove").clicked() {
-                    remove = Some(i);
                 }
             });
         }
@@ -290,7 +294,7 @@ pub fn animations(app: &mut App, ui: &mut Ui) {
                     let btn = egui::Button::new(RichText::new(name).color(if on { ON_ACCENT() } else { MUTED() }))
                         .fill(if on { ACCENT() } else { egui::Color32::TRANSPARENT })
                         .stroke(Stroke::NONE)
-                        .corner_radius(radius(6));
+                        .corner_radius(radius(8));
                     if ui.add(btn).on_hover_text(help).clicked() {
                         *a = preset;
                     }
