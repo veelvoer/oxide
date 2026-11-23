@@ -1619,7 +1619,7 @@ impl App {
         });
         ui.add_space(8.0);
         // the pad: all the height that is left, minus the buttons and quick actions below it
-        let below = 52.0 + 8.0 + 8.0 + 3.0 * 56.0 + 36.0;
+        let below = 52.0 + 8.0 + 8.0 + 44.0 + 8.0 + 2.0 * 68.0 + 36.0;
         let pad_h = (ui.available_height() - below).max(160.0);
         let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), pad_h), Sense::click_and_drag());
         ui.painter().rect_filled(rect, 28.0, p.card);
@@ -1719,67 +1719,84 @@ impl App {
             }
         });
         ui.add_space(8.0);
-        // quick actions, three rows of icons you can scroll sideways
-        let quick: [(&str, &str, u8, &str, &str); 19] = [
-            (ic::GRID, "Overview", 0, "{\"type\":\"toggle_overview\"}", ""),
-            (ic::SEARCH, "Apps", 1, "SUPER+r", ""),
-            (ic::KEYBOARD, "Terminal", 1, "SUPER+q", ""),
-            (ic::CLOSE, "Close", 0, "{\"type\":\"close\"}", ""),
-            (ic::WINDOW, "Float", 0, "{\"type\":\"toggle_floating\"}", ""),
-            (ic::EXPAND, "Fullscreen", 0, "{\"type\":\"toggle_fullscreen\"}", ""),
-            (ic::TABS, "Alt+Tab", 1, "ALT+Tab", ""),
-            (ic::COMMAND, "Super", 1, "Super_L", ""),
-            (ic::LEFT_ARROW, "Esc", 1, "Escape", ""),
-            (ic::ENTER, "Enter", 1, "Return", ""),
-            (ic::MUTE, "Mute", 2, "mute", ""),
-            (ic::SPEAKER, "Vol +", 2, "volume_up", ""),
-            (ic::MUTE, "Vol -", 2, "volume_down", ""),
-            (ic::PLAY, "Play", 2, "media_play_pause", ""),
-            (ic::NEXT, "Next", 2, "media_next", ""),
-            (ic::PREV, "Previous", 2, "media_prev", ""),
-            (ic::LOCK, "Lock", 2, "lock", ""),
-            (ic::LOCK, "Unlock", 3, "unlock", ""),
-            (ic::SEND, "Screenshot", 2, "screenshot", ""),
+        // quick actions: three groups, one at a time, in a fixed grid of four (nothing scrolls, nothing is cut off)
+        type Quick = (&'static str, &'static str, u8, &'static str);
+        let windows: [Quick; 8] = [
+            (ic::GRID, "Overview", 0, "{\"type\":\"toggle_overview\"}"),
+            (ic::SEARCH, "Apps", 1, "SUPER+r"),
+            (ic::KEYBOARD, "Terminal", 1, "SUPER+q"),
+            (ic::CLOSE, "Close", 0, "{\"type\":\"close\"}"),
+            (ic::WINDOW, "Float", 0, "{\"type\":\"toggle_floating\"}"),
+            (ic::EXPAND, "Full", 0, "{\"type\":\"toggle_fullscreen\"}"),
+            (ic::TABS, "Alt+Tab", 1, "ALT+Tab"),
+            (ic::COMMAND, "Super", 1, "Super_L"),
         ];
-        egui::ScrollArea::horizontal().id_salt("quick").auto_shrink([false, true]).show(ui, |ui| {
-            let cols = (quick.len() + 2) / 3;
+        let media: [Quick; 8] = [
+            (ic::PREV, "Previous", 2, "media_prev"),
+            (ic::PLAY, "Play", 2, "media_play_pause"),
+            (ic::NEXT, "Next", 2, "media_next"),
+            (ic::MUTE, "Mute", 2, "mute"),
+            (ic::MUTE, "Quieter", 2, "volume_down"),
+            (ic::SPEAKER, "Louder", 2, "volume_up"),
+            ("", "", 9, ""),
+            ("", "", 9, ""),
+        ];
+        let pc: [Quick; 8] = [
+            (ic::LOCK, "Lock", 2, "lock"),
+            (ic::LOCK, "Unlock", 3, "unlock"),
+            (ic::SEND, "Screenshot", 2, "screenshot"),
+            (ic::LEFT_ARROW, "Esc", 1, "Escape"),
+            (ic::ENTER, "Enter", 1, "Return"),
+            ("", "", 9, ""),
+            ("", "", 9, ""),
+            ("", "", 9, ""),
+        ];
+        let gid = ui.id().with("quick-group");
+        let mut group = ui.data(|d| d.get_temp::<usize>(gid)).unwrap_or(0);
+        ui::segmented(ui, &[(ic::GRID, "Windows"), (ic::PLAY, "Media"), (ic::LOCK, "PC")], &mut group);
+        ui.data_mut(|d| d.insert_temp(gid, group));
+        ui.add_space(8.0);
+        let set: &[Quick; 8] = [&windows, &media, &pc][group.min(2)];
+        let gap = 8.0;
+        let w = (ui.available_width() - 3.0 * gap) / 4.0;
+        for row in 0..2 {
             ui.horizontal(|ui| {
-                ui.spacing_mut().item_spacing = vec2(8.0, 8.0);
-                for c in 0..cols {
-                    ui.vertical(|ui| {
-                        ui.spacing_mut().item_spacing.y = 8.0;
-                        for r in 0..3 {
-                            let Some((glyph, label, kind, arg, _)) = quick.get(c * 3 + r) else { continue };
-                            let (rect, resp) = ui.allocate_exact_size(vec2(96.0, 48.0), Sense::click());
-                            ui.painter().rect_filled(rect, 24.0, p.raised);
-                            if resp.is_pointer_button_down_on() {
-                                ui.painter().rect_filled(rect, 24.0, p.text.gamma_multiply(0.1));
+                ui.spacing_mut().item_spacing = vec2(gap, gap);
+                for col in 0..4 {
+                    let (glyph, label, kind, arg) = set[row * 4 + col];
+                    let (rect, resp) = ui.allocate_exact_size(vec2(w, 60.0), if kind == 9 { Sense::hover() } else { Sense::click() });
+                    if kind == 9 {
+                        continue;
+                    }
+                    let primary = kind == 3;
+                    let (bg, fg) = if primary { (p.accent, p.on_accent) } else { (p.raised, p.text) };
+                    ui.painter().rect_filled(rect, 18.0, bg);
+                    if resp.is_pointer_button_down_on() {
+                        ui.painter().rect_filled(rect, 18.0, fg.gamma_multiply(0.12));
+                    }
+                    ui::icon_at(ui, Pos2::new(rect.center().x, rect.top() + 22.0), glyph, 20.0, fg, false);
+                    ui.painter().text(Pos2::new(rect.center().x, rect.bottom() - 15.0), Align2::CENTER_CENTER, label, medium(12.0), fg);
+                    if tap(&resp) {
+                        match kind {
+                            0 => sends.push(disp(arg)),
+                            1 => {
+                                let (mods, key) = match arg.rsplit_once('+') {
+                                    Some((m, k)) => (m.split('+').map(|x| x.to_lowercase()).collect::<Vec<_>>(), k.to_string()),
+                                    None => (vec![], arg.to_string()),
+                                };
+                                sends.push(ToPc::Key { name: key, mods });
                             }
-                            ui::icon_at(ui, Pos2::new(rect.left() + 22.0, rect.center().y), glyph, 18.0, p.text, false);
-                            ui.painter().text(Pos2::new(rect.left() + 40.0, rect.center().y), Align2::LEFT_CENTER, *label, medium(12.5), p.text);
-                            if tap(&resp) {
-                                match kind {
-                                    0 => sends.push(disp(arg)),
-                                    1 => {
-                                        let (mods, key) = match arg.rsplit_once('+') {
-                                            Some((m, k)) => (m.split('+').map(|x| x.to_lowercase()).collect::<Vec<_>>(), k.to_string()),
-                                            None => (vec![], arg.to_string()),
-                                        };
-                                        sends.push(ToPc::Key { name: key, mods });
-                                    }
-                                    // the PC is unlocked only after this phone's own screen-lock check
-                                    3 => {
-                                        platform::authenticate("Unlock your PC", "Confirm that it is you");
-                                        self.unlocking = true;
-                                    }
-                                    _ => sends.push(act(arg, None)),
-                                }
+                            // the PC is unlocked only after this phone's own screen-lock check
+                            3 => {
+                                platform::authenticate("Unlock your PC", "Confirm that it is you");
+                                self.unlocking = true;
                             }
+                            _ => sends.push(act(arg, None)),
                         }
-                    });
+                    }
                 }
             });
-        });
+        }
         for m in sends {
             let _ = tx.send(m);
         }

@@ -2,6 +2,8 @@
 
 ## 0.2.0 (unreleased)
 
+* Phone app: the quick actions are a fixed grid of four in three groups (Windows, Media, PC): nothing scrolls sideways or is cut off, Unlock is the accent tile.
+* Fixed (phone): "Oxide Remote is not responding": the watch service closed its Bluetooth socket on the main thread. Updates install again (0.7.0 had a different signing key).
 * Unlock the PC from the phone: an "Unlock" tile in the app asks for the phone's fingerprint, face, PIN or pattern, then unlocks the
   lock screen. Off by default: Settings > Phone > "Let my phone unlock this PC".
 * Oxide's own wallpaper engine: the compositor draws the wallpaper itself (photo, picture, color, theme, and a new slideshow of
