@@ -36,4 +36,10 @@ else
   "$BT/apksigner" sign --ks "$KS" --ks-pass pass:android --ks-key-alias androiddebugkey --key-pass pass:android --out "$OUT" $B/aligned.apk
 fi
 "$BT/apksigner" verify "$OUT"
+# an update installs only over an app signed with the same key: refuse to build with another one
+GOT="$("$BT/apksigner" verify --print-certs "$OUT" | grep -m1 'SHA-256' | awk '{print $NF}')"
+if [ -f scripts/cert.sha256 ] && [ "$GOT" != "$(cat scripts/cert.sha256)" ]; then
+  echo "WRONG SIGNING KEY ($GOT): phones with an earlier version could not update. Use the key with $(cat scripts/cert.sha256)." >&2
+  rm -f "$OUT"; exit 1
+fi
 echo "built $OUT ($(du -h "$OUT" | cut -f1))"
