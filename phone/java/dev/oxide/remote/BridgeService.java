@@ -130,13 +130,19 @@ public class BridgeService extends Service {
 
     @Override
     public void onDestroy() {
-        try {
-            if (server != null) server.close();
-        } catch (Exception ignored) {
-        }
-        Thread t = acceptor;
-        if (t != null) t.interrupt();
+        // closing a Bluetooth server socket can block for a long time while another thread waits in accept():
+        // never on the main thread (Android reported "executing service BridgeService, waited 20s" and killed the app)
+        final BluetoothServerSocket s = server;
+        server = null;
+        final Thread t = acceptor;
         acceptor = null;
+        new Thread(() -> {
+            try {
+                if (s != null) s.close();
+            } catch (Exception ignored) {
+            }
+            if (t != null) t.interrupt();
+        }, "oxide-bridge-close").start();
         super.onDestroy();
     }
 }

@@ -1823,7 +1823,7 @@ dependencies = [
 
 [[package]]
 name = "oxide-remote-app"
-version = "0.7.1"
+version = "0.7.2"
 dependencies = [
  "android-activity",
  "android_logger",
