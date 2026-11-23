@@ -139,6 +139,8 @@ pub struct App {
     /// system bars and keyboard in points: top, bottom, left, right, keyboard
     insets: [f32; 5],
     last_platform: Instant,
+    /// waiting for the phone's fingerprint/PIN before the PC is unlocked
+    unlocking: bool,
     last_theme: Instant,
     pal: Pal,
     full: Option<Full>,
@@ -226,6 +228,7 @@ impl App {
             ctx: ctx.clone(),
             insets: [0.0; 5],
             last_platform: Instant::now() - Duration::from_secs(10),
+            unlocking: false,
             last_theme: Instant::now() - Duration::from_secs(10),
             pal: Pal::oxide(true),
             full: None,
@@ -270,6 +273,17 @@ impl App {
     }
 
     fn refresh_platform(&mut self) {
+        if self.unlocking {
+            match platform::auth_result() {
+                2 => {
+                    self.unlocking = false;
+                    self.send(ToPc::Action { name: "unlock".into(), arg: None });
+                    self.toast = Some(("Unlocking the PC…".into(), Instant::now()));
+                }
+                3 => self.unlocking = false,
+                _ => {}
+            }
+        }
         if self.last_platform.elapsed() > Duration::from_millis(300) {
             let ppp = self.ctx.pixels_per_point().max(0.5);
             let i = platform::insets();
@@ -1706,7 +1720,7 @@ impl App {
         });
         ui.add_space(8.0);
         // quick actions, three rows of icons you can scroll sideways
-        let quick: [(&str, &str, u8, &str, &str); 18] = [
+        let quick: [(&str, &str, u8, &str, &str); 19] = [
             (ic::GRID, "Overview", 0, "{\"type\":\"toggle_overview\"}", ""),
             (ic::SEARCH, "Apps", 1, "SUPER+r", ""),
             (ic::KEYBOARD, "Terminal", 1, "SUPER+q", ""),
@@ -1724,6 +1738,7 @@ impl App {
             (ic::NEXT, "Next", 2, "media_next", ""),
             (ic::PREV, "Previous", 2, "media_prev", ""),
             (ic::LOCK, "Lock", 2, "lock", ""),
+            (ic::LOCK, "Unlock", 3, "unlock", ""),
             (ic::SEND, "Screenshot", 2, "screenshot", ""),
         ];
         egui::ScrollArea::horizontal().id_salt("quick").auto_shrink([false, true]).show(ui, |ui| {
@@ -1751,6 +1766,11 @@ impl App {
                                             None => (vec![], arg.to_string()),
                                         };
                                         sends.push(ToPc::Key { name: key, mods });
+                                    }
+                                    // the PC is unlocked only after this phone's own screen-lock check
+                                    3 => {
+                                        platform::authenticate("Unlock your PC", "Confirm that it is you");
+                                        self.unlocking = true;
                                     }
                                     _ => sends.push(act(arg, None)),
                                 }

@@ -39,6 +39,13 @@ pub fn output_geometry(name: Option<&str>) -> Option<(f64, f64, f64, f64)> {
 pub fn action(name: &str, arg: Option<&str>) -> Result<(), String> {
     match name {
         "lock" => run("oxide-ctl", &["lock"]).or_else(|_| run("loginctl", &["lock-session"])),
+        "unlock" => {
+            // only when the PC's owner allowed it (Settings > Phone); the phone asks for its biometrics before it sends this
+            if !oxide_config::Config::load().map(|c| c.remote.phone_unlock).unwrap_or(false) {
+                return Err("Unlocking from the phone is off. Switch it on in Oxide Settings > Phone.".into());
+            }
+            run("oxide-ctl", &["ipc", "shell", "unlock"])
+        }
         "suspend" => run("systemctl", &["suspend"]),
         "reboot" => run("systemctl", &["reboot"]),
         "shutdown" => run("systemctl", &["poweroff"]),

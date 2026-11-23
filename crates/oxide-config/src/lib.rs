@@ -450,11 +450,13 @@ pub struct RemoteCfg {
     pub phone_max_size: u32,
     pub phone_bitrate: u32,
     pub phone_audio: bool,
+    /// A paired phone may unlock the lock screen (the phone asks for its fingerprint, face, PIN or pattern first).
+    pub phone_unlock: bool,
 }
 
 impl Default for RemoteCfg {
     fn default() -> Self {
-        Self { enabled: false, anywhere: false, rendezvous: "https://ntfy.sh".into(), notes: true, phone_max_size: 1600, phone_bitrate: 12, phone_audio: false }
+        Self { enabled: false, anywhere: false, rendezvous: "https://ntfy.sh".into(), notes: true, phone_max_size: 1600, phone_bitrate: 12, phone_audio: false, phone_unlock: false }
     }
 }
 

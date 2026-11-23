@@ -98,6 +98,9 @@ pub fn page(app: &mut App, ui: &mut Ui) {
             app.cfg.remote.enabled = on;
             st.last = None;
         }
+        if app.cfg.remote.enabled {
+            toggle_row(ui, "Let my phone unlock this PC", "A button in the app. The phone asks for your fingerprint, face, PIN or pattern first.", true, &mut app.cfg.remote.phone_unlock);
+        }
     });
     if !app.cfg.remote.enabled {
         crate::pages::note(ui, "Get the Oxide Remote app on your phone (phone/ in the Oxide source, see docs/PHONE.md), then switch this on.");

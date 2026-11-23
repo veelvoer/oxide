@@ -94,6 +94,7 @@ ShellRoot {
         function toggleWindow(): void { root.toggleWindow(); }
         function toggleNotifications(): void { root.toggleNotifications(); }
         function lock(): void { root.closeMenus(); lockScreen.lock(); }
+        function unlock(): void { lockScreen.unlocked(); }
     }
     IpcHandler {
         target: "ai"

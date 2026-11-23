@@ -2,6 +2,8 @@
 
 ## 0.2.0 (unreleased)
 
+* Unlock the PC from the phone: an "Unlock" tile in the app asks for the phone's fingerprint, face, PIN or pattern, then unlocks the
+  lock screen. Off by default: Settings > Phone > "Let my phone unlock this PC".
 * Oxide's own wallpaper engine: the compositor draws the wallpaper itself (photo, picture, color, theme, and a new slideshow of
   a folder with an interval and shuffle), cross-fading between pictures, scaled once to each screen. The shell no longer opens
   a wallpaper window of its own (other shells and compositors still get the old one).

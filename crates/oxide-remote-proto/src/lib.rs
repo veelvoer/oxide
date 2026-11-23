@@ -79,7 +79,7 @@ pub enum ToPc {
     Scroll { dx: f64, dy: f64 },
     Key { name: String, mods: Vec<String> },
     Text { text: String },
-    /// lock, suspend, reboot, shutdown, logout, media_play_pause, media_next, media_prev, volume (arg 0-100),
+    /// lock, unlock (only when the PC allows it), suspend, reboot, shutdown, logout, media_play_pause, media_next, media_prev, volume (arg 0-100),
     /// mute, workspace (arg number), run (arg command), open_url (arg url), notify (arg text), clipboard_set (arg text)
     Action { name: String, arg: Option<String> },
     ClipboardGet,

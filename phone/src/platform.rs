@@ -153,6 +153,19 @@ mod imp {
         void_str("installUpdate", url)
     }
 
+    /// Ask for this phone's fingerprint, face, PIN or pattern; poll `auth_result`.
+    pub fn authenticate(title: &str, text: &str) {
+        call(|env, a| {
+            let (t, x) = (env.new_string(title)?, env.new_string(text)?);
+            env.call_method(a, "authenticate", "(Ljava/lang/String;Ljava/lang/String;)V", &[JValue::Object(&t), JValue::Object(&x)]).map(|_| ())
+        });
+    }
+
+    /// 0 nothing new, 1 still asking, 2 passed, 3 failed or cancelled (2 and 3 are reported once).
+    pub fn auth_result() -> i32 {
+        call(|env, a| env.call_method(a, "authResult", "()I", &[])?.i()).unwrap_or(0)
+    }
+
     /// (state, progress): 0 idle, 1 downloading, 2 waiting for the user's OK, 3 failed
     pub fn update_status() -> (i32, i32) {
         call(|env, a| {
@@ -218,6 +231,11 @@ mod imp {
     }
     pub fn install_update(url: &str) {
         open_url(url)
+    }
+    // the desktop test build has no biometrics: it passes at once
+    pub fn authenticate(_: &str, _: &str) {}
+    pub fn auth_result() -> i32 {
+        2
     }
     pub fn update_status() -> (i32, i32) {
         (0, 0)

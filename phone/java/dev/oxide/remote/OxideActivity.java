@@ -352,6 +352,63 @@ public class OxideActivity extends NativeActivity {
         if (code == 77) applyBridge();
     }
 
+    // ------------------------------------------------------------------ identity check (unlock the PC)
+
+    private volatile int authState = 0; // 0 idle, 1 asking, 2 passed, 3 failed or cancelled
+
+    /** Ask for the fingerprint, face, PIN or pattern of this phone. The answer comes through authResult(). */
+    public void authenticate(String title, String text) {
+        if (authState == 1) return;
+        authState = 1;
+        runOnUiThread(() -> {
+            try {
+                if (Build.VERSION.SDK_INT >= 29) {
+                    android.hardware.biometrics.BiometricPrompt.Builder b = new android.hardware.biometrics.BiometricPrompt.Builder(this)
+                            .setTitle(title).setDescription(text);
+                    if (Build.VERSION.SDK_INT >= 30) {
+                        b.setAllowedAuthenticators(android.hardware.biometrics.BiometricManager.Authenticators.BIOMETRIC_STRONG
+                                | android.hardware.biometrics.BiometricManager.Authenticators.DEVICE_CREDENTIAL);
+                    } else {
+                        b.setDeviceCredentialAllowed(true);
+                    }
+                    android.os.CancellationSignal cancel = new android.os.CancellationSignal();
+                    b.build().authenticate(cancel, getMainExecutor(), new android.hardware.biometrics.BiometricPrompt.AuthenticationCallback() {
+                        @Override
+                        public void onAuthenticationSucceeded(android.hardware.biometrics.BiometricPrompt.AuthenticationResult r) {
+                            authState = 2;
+                        }
+
+                        @Override
+                        public void onAuthenticationError(int code, CharSequence msg) {
+                            authState = 3;
+                        }
+                    });
+                } else {
+                    // older Android: the screen-lock check
+                    android.app.KeyguardManager km = (android.app.KeyguardManager) getSystemService(KEYGUARD_SERVICE);
+                    Intent i = km == null ? null : km.createConfirmDeviceCredentialIntent(title, text);
+                    if (i == null) authState = 3;
+                    else startActivityForResult(i, 78);
+                }
+            } catch (Throwable t) {
+                authState = 3;
+            }
+        });
+    }
+
+    /** 0 nothing new, 1 still asking, 2 passed (reported once), 3 failed or cancelled (reported once). */
+    public int authResult() {
+        int s = authState;
+        if (s >= 2) authState = 0;
+        return s;
+    }
+
+    @Override
+    protected void onActivityResult(int code, int result, Intent data) {
+        super.onActivityResult(code, result, data);
+        if (code == 78) authState = result == RESULT_OK ? 2 : 3;
+    }
+
     private void handleInstallIntent(Intent intent) {
         if (intent == null || !"dev.oxide.remote.INSTALL".equals(intent.getAction())) return;
         int status = intent.getIntExtra(PackageInstaller.EXTRA_STATUS, -999);
