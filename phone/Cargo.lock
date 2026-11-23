@@ -1823,7 +1823,7 @@ dependencies = [
 
 [[package]]
 name = "oxide-remote-app"
-version = "0.6.1"
+version = "0.7.0"
 dependencies = [
  "android-activity",
  "android_logger",
@@ -1839,7 +1839,7 @@ dependencies = [
 
 [[package]]
 name = "oxide-remote-proto"
-version = "0.11.0"
+version = "0.12.0"
 dependencies = [
  "chacha20poly1305",
  "getrandom 0.2.17",
