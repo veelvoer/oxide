@@ -521,7 +521,7 @@ pub struct UpdateCfg {
 
 impl Default for UpdateCfg {
     fn default() -> Self {
-        Self { auto: true, repo: "https://github.com/veelvoer/oxide".into(), branch: "main".into() }
+        Self { auto: false, repo: "https://github.com/veelvoer/oxide".into(), branch: "main".into() }
     }
 }
 

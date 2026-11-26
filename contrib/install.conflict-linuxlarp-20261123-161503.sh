@@ -1,0 +1,32 @@
+#!/bin/sh
+# Build in release mode and install:
+#   binaries      -> ~/.local/bin
+#   shells        -> ~/.local/share/oxide/shells (bundled) and ~/.config/oxide/shells (yours, never overwritten)
+set -e
+cd "$(dirname "$0")/.."
+cargo build --release
+T="${CARGO_TARGET_DIR:-target}/release"
+mkdir -p "$HOME/.local/share/oxide/wallpapers" "$HOME/.local/bin" "$HOME/.local/share/oxide/shells" "$HOME/.config/oxide/shells"
+# which commit this is, for `oxide-ctl update` ("-dirty": local changes, never replaced by an update)
+if V=$(git rev-parse HEAD 2>/dev/null); then
+  git diff --quiet HEAD -- 2>/dev/null || V="$V-dirty"
+  echo "$V" > "$HOME/.local/share/oxide/version"
+fi
+install -m755 "$T/oxide" "$T/oxide-ctl" "$T/oxide-settings" "$T/oxide-ai" "$T/oxide-remoted" contrib/oxide-session "$HOME/.local/bin/"
+rm -rf "$HOME/.local/share/oxide/shells/oxide"
+cp -r contrib/shells/oxide "$HOME/.local/share/oxide/shells/oxide"
+# Oxide's own QML module (`import Oxide`)
+rm -rf "$HOME/.local/share/oxide/qml/Oxide"; mkdir -p "$HOME/.local/share/oxide/qml"
+cp -r contrib/qml/Oxide "$HOME/.local/share/oxide/qml/Oxide"
+cp -r contrib/wallpapers/. "$HOME/.local/share/oxide/wallpapers/"
+# the settings app shows up in app launchers like any other app
+install -Dm644 contrib/oxide-settings.desktop "$HOME/.local/share/applications/oxide-settings.desktop"
+install -Dm644 contrib/branding/oxide-logo.svg "$HOME/.local/share/icons/hicolor/scalable/apps/oxide-settings.svg"
+# first install: give the user an editable copy; later runs leave their copy alone
+[ -d "$HOME/.config/oxide/shells/oxide" ] || cp -r contrib/shells/oxide "$HOME/.config/oxide/shells/oxide"
+echo "Installed to ~/.local/bin (make sure it is in PATH)."
+echo "The default shell is copied to ~/.config/oxide/shells/oxide and refreshed automatically when it changes"
+echo "(the old copy is kept in ~/.config/oxide/shell-backups). To refresh it by hand:"
+echo "    rm -rf ~/.config/oxide/shells/oxide && cp -r ~/.local/share/oxide/shells/oxide ~/.config/oxide/shells/oxide"
+echo "To get a login-manager entry:  sudo install -Dm644 contrib/oxide.desktop /usr/share/wayland-sessions/oxide.desktop"
+echo "Or from a TTY just run:        oxide-session"

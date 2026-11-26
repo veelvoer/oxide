@@ -62,9 +62,10 @@ impl Oxide {
             XWaylandEvent::Ready { x11_socket, display_number } => {
                 match X11Wm::start_wm(state.loop_handle.clone(), x11_socket, client.clone()) {
                     Ok(mut wm) => {
-                        let img = state.cursor.get("default", 1, std::time::Duration::ZERO);
-                        let _ = img;
-                        let _ = wm.set_cursor(&[0; 4], (1, 1).into(), (0, 0).into());
+                        // the cursor of every X window that has none of its own (menus, dropdowns, popups) is the normal
+                        // arrow; an empty one here made the pointer vanish over them
+                        let (px, w, h, hx, hy) = state.cursor.raw("default");
+                        let _ = wm.set_cursor(&px, (w, h).into(), (hx, hy).into());
                         state.xwm = Some(wm);
                         std::env::set_var("DISPLAY", format!(":{display_number}"));
                         info!("XWayland ready on :{display_number}");
@@ -135,9 +136,24 @@ impl XwmHandler for Oxide {
         h: Option<u32>,
         _reorder: Option<Reorder>,
     ) {
-        if self.x11_win_idx(&window).is_some() {
-            // managed windows are laid out by us; repeat the current geometry
-            let _ = window.configure(window.geometry());
+        if let Some(i) = self.x11_win_idx(&window) {
+            let (floating, fullscreen) = (self.wins[i].floating, self.wins[i].fullscreen);
+            // tiled windows are laid out by us: repeat the current geometry
+            if !floating || fullscreen || (w.is_none() && h.is_none() && x.is_none() && y.is_none()) {
+                let _ = window.configure(window.geometry());
+                return;
+            }
+            // a floating window (a dialog, a popup, Unity's editor windows) that asks for another size or place gets it:
+            // they open small and grow to their content, and refusing left them empty
+            let bs = self.config.general.border_size.max(0);
+            let cur = self.wins[i].float_geo.unwrap_or(self.wins[i].rect);
+            let size = (w.map_or(cur.size.w - 2 * bs, |v| v as i32).max(1) + 2 * bs, h.map_or(cur.size.h - 2 * bs, |v| v as i32).max(1) + 2 * bs);
+            let loc = match (x, y) {
+                (Some(x), Some(y)) => (x - bs, y - bs).into(),
+                _ => cur.loc,
+            };
+            self.wins[i].float_geo = Some(Rectangle::new(loc, size.into()));
+            self.arrange();
             return;
         }
         let mut geo = window.geometry();

@@ -2257,7 +2257,7 @@ dependencies = [
 
 [[package]]
 name = "oxide-ai"
-version = "0.11.0"
+version = "0.13.0"
 dependencies = [
  "base64",
  "oxide-config",
@@ -2269,7 +2269,7 @@ dependencies = [
 
 [[package]]
 name = "oxide-compositor"
-version = "0.11.0"
+version = "0.13.0"
 dependencies = [
  "image",
  "oxide-config",
@@ -2287,7 +2287,7 @@ dependencies = [
 
 [[package]]
 name = "oxide-config"
-version = "0.11.0"
+version = "0.13.0"
 dependencies = [
  "image",
  "serde",
@@ -2297,7 +2297,7 @@ dependencies = [
 
 [[package]]
 name = "oxide-ctl"
-version = "0.11.0"
+version = "0.13.0"
 dependencies = [
  "oxide-config",
  "oxide-ipc",
@@ -2306,7 +2306,7 @@ dependencies = [
 
 [[package]]
 name = "oxide-ipc"
-version = "0.11.0"
+version = "0.13.0"
 dependencies = [
  "oxide-config",
  "serde",
@@ -2315,14 +2315,14 @@ dependencies = [
 
 [[package]]
 name = "oxide-layout"
-version = "0.11.0"
+version = "0.13.0"
 dependencies = [
  "oxide-config",
 ]
 
 [[package]]
 name = "oxide-remote"
-version = "0.11.0"
+version = "0.13.0"
 dependencies = [
  "jpeg-encoder",
  "oxide-config",
@@ -2338,7 +2338,7 @@ dependencies = [
 
 [[package]]
 name = "oxide-remote-host"
-version = "0.11.0"
+version = "0.13.0"
 dependencies = [
  "arboard",
  "eframe",
@@ -2354,7 +2354,7 @@ dependencies = [
 
 [[package]]
 name = "oxide-remote-proto"
-version = "0.11.0"
+version = "0.13.0"
 dependencies = [
  "chacha20poly1305",
  "getrandom 0.2.17",
@@ -2368,7 +2368,7 @@ dependencies = [
 
 [[package]]
 name = "oxide-settings"
-version = "0.11.0"
+version = "0.13.0"
 dependencies = [
  "eframe",
  "egui_extras",

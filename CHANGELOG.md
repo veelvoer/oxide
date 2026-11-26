@@ -2,6 +2,8 @@
 
 ## 0.2.0 (unreleased)
 
+* Updates: half a minute after login Oxide looks for a new version and, when there is one, shows a card with an Update button (and Later). Automatic installing is now off by default (Settings > Config > Updates switches it on). Builds with local changes are not offered an update.
+* Fixed (Unity and other X11 programs): the pointer no longer vanishes over their dropdowns (the X11 default cursor was empty); floating X11 windows can resize themselves, so windows that open small and grow (Unity's editor windows) show their content.
 * Phone app: the quick actions are a fixed grid of four in three groups (Windows, Media, PC): nothing scrolls sideways or is cut off, Unlock is the accent tile.
 * Fixed (phone): "Oxide Remote is not responding": the watch service closed its Bluetooth socket on the main thread. Updates install again (0.7.0 had a different signing key).
 * Unlock the PC from the phone: an "Unlock" tile in the app asks for the phone's fingerprint, face, PIN or pattern, then unlocks the

@@ -8,6 +8,7 @@ Dock Dock.qml
 Hud Hud.qml
 ConfigError ConfigError.qml
 WhatsNew WhatsNew.qml
+UpdateOffer UpdateOffer.qml
 PillSlider PillSlider.qml
 Chip Chip.qml
 Toggle Toggle.qml

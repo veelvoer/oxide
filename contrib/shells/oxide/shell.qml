@@ -74,6 +74,7 @@ ShellRoot {
     Hud {}
     ConfigError {}
     WhatsNew {}
+    UpdateOffer {}
     WindowOptions { shown: root.windowShown; onDismissed: root.windowShown = false }
     Clipboard { shown: root.clipboardShown; onDismissed: root.clipboardShown = false }
     AIPanel { id: aiPanel; ai: ai; shown: root.aiShown; onDismissed: root.aiShown = false }

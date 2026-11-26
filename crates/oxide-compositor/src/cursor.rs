@@ -63,6 +63,14 @@ impl CursorLoader {
         &self.icons[name]
     }
 
+    /// The first frame of an icon as plain RGBA pixels: (pixels, width, height, hotspot x, hotspot y). For X11's root cursor.
+    pub fn raw(&mut self, name: &str) -> (Vec<u8>, u16, u16, u16, u16) {
+        let size = self.size;
+        self.images(name);
+        let img = self.icons[name].iter().min_by_key(|i| (size as i32 - i.size as i32).abs()).unwrap();
+        (img.pixels_rgba.clone(), img.width as u16, img.height as u16, img.xhot as u16, img.yhot as u16)
+    }
+
     /// Cursor image for a CSS-style icon name at the given time.
     pub fn get(&mut self, name: &str, scale: u32, time: Duration) -> CursorFrame {
         let size = self.size * scale;

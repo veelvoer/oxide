@@ -1,0 +1,38 @@
+[package]
+name = "oxide-compositor"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "oxide"
+path = "src/main.rs"
+
+[dependencies]
+oxide-config = { path = "../oxide-config" }
+oxide-ipc = { path = "../oxide-ipc" }
+oxide-layout = { path = "../oxide-layout" }
+serde_json.workspace = true
+image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+xcursor = "0.3"
+thiserror = "2"
+smithay-drm-extras = { version = "0.1", default-features = false }
+wayland-protocols-wlr = { version = "0.3", features = ["server"] }
+
+[dependencies.smithay]
+version = "0.7.0"
+default-features = false
+features = [
+    "desktop",
+    "wayland_frontend",
+    "renderer_gl",
+    "backend_winit",
+    "backend_drm",
+    "backend_gbm",
+    "backend_udev",
+    "backend_libinput",
+    "backend_session_libseat",
+    "xwayland",
+]

@@ -23,12 +23,14 @@ impl Oxide {
         if std::env::var_os("OXIDE_TEST").is_some() {
             return;
         }
-        // the first look a few minutes after login (the session settles first), then every six hours
-        let _ = self.loop_handle.insert_source(Timer::from_duration(Duration::from_secs(240)), |_, _, state| {
-            if state.config.update.auto {
-                std::thread::spawn(|| {
+        // the first look half a minute after login (the session settles first), then every six hours. With automatic
+        // updates on it also installs; otherwise it only looks, and the shell offers an Update button
+        let _ = self.loop_handle.insert_source(Timer::from_duration(Duration::from_secs(30)), |_, _, state| {
+            {
+                let how = if state.config.update.auto { "auto" } else { "check" };
+                std::thread::spawn(move || {
                     let _ = std::process::Command::new("oxide-ctl")
-                        .args(["update", "auto"])
+                        .args(["update", how])
                         .stdin(std::process::Stdio::null())
                         .stdout(std::process::Stdio::null())
                         .stderr(std::process::Stdio::null())

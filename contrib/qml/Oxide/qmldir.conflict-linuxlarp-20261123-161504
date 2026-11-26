@@ -1,0 +1,6 @@
+# Oxide's own QML module: what Quickshell.Hyprland is for Hyprland. `import Oxide` in any Quickshell config.
+#   OxideState  live compositor state (workspaces, windows, focus, outputs, profile) and dispatch()
+#   Sys         system numbers (cpu, memory, battery, network ...)
+module Oxide
+singleton OxideState OxideState.qml
+singleton Sys Sys.qml
